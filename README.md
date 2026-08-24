@@ -1,7 +1,7 @@
 # Nordstart
 
 An [Omarchy](https://omarchy.org) shell plugin that opens a workspace launcher
-from a rectangle on the top bar.
+from a 3×3 grid icon on the top bar.
 
 The modal has two halves:
 
@@ -13,6 +13,9 @@ The modal has two halves:
 
 Click a workspace, press `1`–`9`, or move with the arrow keys / `hjkl` and
 press Enter.
+
+## Disclaimer
+This plugin is made with Grok AI. The code is not guaranteed to be correct and may require manual review and testing. Use at your own risk.
 
 ## Install
 
@@ -57,7 +60,7 @@ omarchy-shell shell toggle nordstart
 
 ## Use
 
-- Hover or click the rectangle on the bar (to the right of the workspace
+- Hover or click the grid icon on the bar (to the right of the workspace
   numbers) to open the launcher.
 - Click a workspace, or press its number, to switch to it.
 - Click a pinned app to focus it if it is running, or to open it on an empty
@@ -74,13 +77,56 @@ Tune the widget from the bar settings panel, or inline in
   "id": "nordstart",
   "hoverOpen": true,
   "workspaceCount": 9,
-  "pinnedApps": "firefox,code,thunderbird,tableplus,onlyoffice-desktopeditors"
+  "pinnedApps": "firefox,code,thunderbird,tableplus,onlyoffice-desktopeditors",
+  "appNames": "",
+  "appAliases": ""
 }
 ```
 
 `pinnedApps` is a comma-separated list of desktop entry ids. Installed apps
-are resolved with a few aliases (`code` also matches VS Code / Codium). Apps
-that are not installed are skipped.
+are resolved with a few aliases (`code` also matches VS Code / Codium, `files`
+matches Nautilus). Apps that are not installed are skipped.
+
+Nautilus windows show as **Files**. Other common desktop classes (Chrome,
+Telegram, Spotify, Settings, and so on) have built-in friendly names too.
+
+### Custom names and aliases
+
+Override a display name, or add ids of your own, from the bar settings panel
+or in `shell.json`:
+
+```json
+{
+  "id": "nordstart",
+  "appNames": "org.gnome.Nautilus=Files,firefox=Web,my.custom.app=Notes",
+  "appAliases": "notes=my.custom.app|com.example.Notes"
+}
+```
+
+`appNames` also accepts a JSON object:
+
+```json
+"appNames": { "org.telegram.desktop": "Telegram", "Alacritty": "Term" }
+```
+
+User names always win over the built-in map. `appAliases` is for pinning and
+for matching a running window to a pinned row (`id=alias|alias`).
+
+## Tests
+
+The naming, alias, workspace, and pinned-app logic lives in
+`NordstartModel.js` as plain functions, so it can be checked without the
+desktop session:
+
+```bash
+node --test tests/nordstart-model.test.js
+```
+
+That is the right kind of test for this plugin: it locks down labels, user
+overrides, terminal subtitles, and workspace cursor movement. Full UI
+open/click/hover coverage still belongs to using the plugin on the bar —
+QML here depends on `omarchy-shell`, Hyprland, and layer-shell, which a
+headless unit test cannot see.
 
 ## Remove
 

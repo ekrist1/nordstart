@@ -9,16 +9,28 @@ var DEFAULT_PINNED = [
 ]
 
 var ID_ALIASES = {
-  "firefox": ["firefox", "org.mozilla.firefox", "firefox-esr"],
-  "code": ["code", "code-oss", "visual-studio-code", "com.visualstudio.code", "codium", "com.vscodium.codium"],
-  "thunderbird": ["thunderbird", "org.mozilla.Thunderbird", "net.thunderbird.Thunderbird"],
-  "tableplus": ["tableplus", "com.tinyapp.TablePlus"],
-  "onlyoffice-desktopeditors": [
-    "onlyoffice-desktopeditors",
-    "org.onlyoffice.desktopeditors",
-    "DesktopEditors",
-    "onlyoffice"
-  ]
+  firefox: ["firefox", "org.mozilla.firefox", "firefox-esr"],
+  chromium: ["chromium", "chromium-browser", "org.chromium.Chromium"],
+  chrome: ["google-chrome", "google-chrome-stable", "com.google.Chrome"],
+  brave: ["brave", "brave-browser", "com.brave.Browser"],
+  code: ["code", "code-oss", "visual-studio-code", "com.visualstudio.code", "codium", "com.vscodium.codium"],
+  thunderbird: ["thunderbird", "org.mozilla.Thunderbird", "net.thunderbird.Thunderbird"],
+  files: ["nautilus", "org.gnome.Nautilus", "nemo", "org.nemo.Nemo", "thunar", "thunar-3", "pcmanfm", "org.kde.dolphin"],
+  nautilus: ["nautilus", "org.gnome.Nautilus"],
+  tableplus: ["tableplus", "com.tinyapp.TablePlus"],
+  onlyoffice: ["onlyoffice-desktopeditors", "org.onlyoffice.desktopeditors", "DesktopEditors", "onlyoffice"],
+  "onlyoffice-desktopeditors": ["onlyoffice-desktopeditors", "org.onlyoffice.desktopeditors", "DesktopEditors", "onlyoffice"],
+  discord: ["discord", "vesktop", "dev.vencord.Vesktop", "com.discordapp.Discord"],
+  telegram: ["telegram", "telegram-desktop", "org.telegram.desktop"],
+  signal: ["signal", "signal-desktop", "org.signal.Signal"],
+  slack: ["slack", "com.slack.Slack"],
+  spotify: ["spotify", "com.spotify.Client"],
+  vlc: ["vlc", "org.videolan.VLC"],
+  mpv: ["mpv", "io.mpv.Mpv"],
+  steam: ["steam", "com.valvesoftware.Steam"],
+  obsidian: ["obsidian", "md.obsidian.Obsidian"],
+  calculator: ["gnome-calculator", "org.gnome.Calculator"],
+  settings: ["gnome-control-center", "org.gnome.Settings"]
 }
 
 var CLASS_LABELS = {
@@ -29,19 +41,90 @@ var CLASS_LABELS = {
   wezterm: "Terminal",
   konsole: "Terminal",
   xterm: "Terminal",
+  ptyxis: "Terminal",
+  tilix: "Terminal",
+  terminator: "Terminal",
+  "xfce4-terminal": "Terminal",
   "org.gnome.terminal": "Terminal",
   "org.gnome.console": "Terminal",
+  "org.gnome.ptyxis": "Terminal",
   "com.mitchellh.ghostty": "Terminal",
+  nautilus: "Files",
+  "org.gnome.nautilus": "Files",
+  nemo: "Files",
+  "org.nemo.nemo": "Files",
+  thunar: "Files",
+  "thunar-3": "Files",
+  pcmanfm: "Files",
+  "org.kde.dolphin": "Files",
+  dolphin: "Files",
   code: "Code",
   "code-oss": "Code",
   "visual-studio-code": "Code",
   codium: "Code",
+  cursor: "Cursor",
+  "cursor-url-handler": "Cursor",
   firefox: "Firefox",
   "org.mozilla.firefox": "Firefox",
+  chromium: "Chromium",
+  "org.chromium.chromium": "Chromium",
+  "google-chrome": "Chrome",
+  "google-chrome-stable": "Chrome",
+  "com.google.chrome": "Chrome",
+  brave: "Brave",
+  "brave-browser": "Brave",
+  "com.brave.browser": "Brave",
   thunderbird: "Thunderbird",
   "org.mozilla.thunderbird": "Thunderbird",
+  "net.thunderbird.thunderbird": "Thunderbird",
   tableplus: "Tableplus",
-  "com.tinyapp.tableplus": "Tableplus"
+  "com.tinyapp.tableplus": "Tableplus",
+  discord: "Discord",
+  vesktop: "Discord",
+  "com.discordapp.discord": "Discord",
+  telegram: "Telegram",
+  "telegram-desktop": "Telegram",
+  "org.telegram.desktop": "Telegram",
+  signal: "Signal",
+  "signal-desktop": "Signal",
+  "org.signal.signal": "Signal",
+  slack: "Slack",
+  "com.slack.slack": "Slack",
+  spotify: "Spotify",
+  "com.spotify.client": "Spotify",
+  vlc: "VLC",
+  "org.videolan.vlc": "VLC",
+  mpv: "mpv",
+  steam: "Steam",
+  "com.valvesoftware.steam": "Steam",
+  obsidian: "Obsidian",
+  "md.obsidian.obsidian": "Obsidian",
+  gimp: "GIMP",
+  "org.gimp.gimp": "GIMP",
+  inkscape: "Inkscape",
+  "org.inkscape.inkscape": "Inkscape",
+  blender: "Blender",
+  "org.blender.blender": "Blender",
+  "libreoffice-writer": "Writer",
+  "libreoffice-calc": "Calc",
+  "libreoffice-impress": "Impress",
+  soffice: "LibreOffice",
+  "org.gnome.calculator": "Calculator",
+  "gnome-calculator": "Calculator",
+  "org.gnome.settings": "Settings",
+  "gnome-control-center": "Settings",
+  "org.gnome.software": "Software",
+  "org.gnome.texteditor": "Text Editor",
+  "gnome-text-editor": "Text Editor",
+  evince: "Document Viewer",
+  "org.gnome.evince": "Document Viewer",
+  "org.gnome.papers": "Document Viewer",
+  eog: "Image Viewer",
+  "org.gnome.eog": "Image Viewer",
+  loupe: "Image Viewer",
+  "org.gnome.loupe": "Image Viewer",
+  "org.gnome.systemmonitor": "System Monitor",
+  "gnome-system-monitor": "System Monitor"
 }
 
 var EMULATOR_NAMES = {
@@ -95,19 +178,108 @@ function parsePinnedSetting(raw) {
   return ids.length ? ids : DEFAULT_PINNED.slice()
 }
 
-function aliasCandidates(id) {
-  var clean = stripDesktop(id)
-  var aliases = ID_ALIASES[clean.toLowerCase()]
-  var out = [clean]
-  if (!aliases) return out
-  for (var i = 0; i < aliases.length; i++) {
-    if (out.indexOf(aliases[i]) === -1) out.push(aliases[i])
+function parseNameMap(raw) {
+  var out = ({})
+  function add(key, label) {
+    var id = stripDesktop(key).toLowerCase()
+    var name = String(label || "").trim()
+    if (id && name) out[id] = name
+  }
+  if (raw == null || raw === "") return out
+  if (typeof raw === "object" && !Array.isArray(raw)) {
+    for (var key in raw) add(key, raw[key])
+    return out
+  }
+  var text = String(raw).trim()
+  if (!text) return out
+  if (text.charAt(0) === "{") {
+    try { return parseNameMap(JSON.parse(text)) } catch (e) { return out }
+  }
+  var parts = text.split(/[,;\n]+/)
+  for (var i = 0; i < parts.length; i++) {
+    var pair = parts[i]
+    var eq = pair.indexOf("=")
+    if (eq < 1) continue
+    add(pair.slice(0, eq), pair.slice(eq + 1))
   }
   return out
 }
 
-function lookupEntry(id, desktopEntries) {
-  var candidates = aliasCandidates(id)
+function parseAliasMap(raw) {
+  var out = ({})
+  function add(key, values) {
+    var id = stripDesktop(key).toLowerCase()
+    if (!id) return
+    if (!out[id]) out[id] = []
+    var list = Array.isArray(values) ? values : String(values || "").split(/[|,]/)
+    for (var i = 0; i < list.length; i++) {
+      var item = stripDesktop(list[i])
+      if (item && out[id].indexOf(item) === -1) out[id].push(item)
+    }
+  }
+  if (raw == null || raw === "") return out
+  if (typeof raw === "object" && !Array.isArray(raw)) {
+    for (var key in raw) add(key, raw[key])
+    return out
+  }
+  var text = String(raw).trim()
+  if (!text) return out
+  if (text.charAt(0) === "{") {
+    try { return parseAliasMap(JSON.parse(text)) } catch (e) { return out }
+  }
+  var parts = text.split(/[,;\n]+/)
+  for (var p = 0; p < parts.length; p++) {
+    var eq = parts[p].indexOf("=")
+    if (eq < 1) continue
+    add(parts[p].slice(0, eq), parts[p].slice(eq + 1))
+  }
+  return out
+}
+
+function aliasCandidates(id, userAliases) {
+  var clean = stripDesktop(id)
+  var out = []
+  function add(value) {
+    var item = stripDesktop(value)
+    if (!item) return
+    for (var i = 0; i < out.length; i++) if (out[i] === item) return
+    out.push(item)
+  }
+  function addAll(list) {
+    if (!list) return
+    if (typeof list === "string") list = String(list).split(/[|,]/)
+    for (var i = 0; i < list.length; i++) add(list[i])
+  }
+
+  add(clean)
+  var lower = clean.toLowerCase()
+  addAll(ID_ALIASES[lower])
+  var norm = normalizeKey(clean)
+  for (var builtin in ID_ALIASES) {
+    if (normalizeKey(builtin) === norm) addAll(ID_ALIASES[builtin])
+  }
+
+  if (userAliases) {
+    addAll(userAliases[lower])
+    for (var key in userAliases) {
+      var group = userAliases[key]
+      var matches = normalizeKey(key) === norm
+      if (!matches && Array.isArray(group)) {
+        for (var g = 0; g < group.length; g++) {
+          if (normalizeKey(group[g]) === norm) { matches = true; break }
+        }
+      }
+      if (matches) {
+        add(key)
+        addAll(group)
+      }
+    }
+  }
+  return out
+}
+
+function lookupEntry(id, desktopEntries, userAliases) {
+  var candidates = aliasCandidates(id, userAliases)
   if (!desktopEntries) return null
 
   for (var i = 0; i < candidates.length; i++) {
@@ -190,11 +362,25 @@ function classTail(cls) {
   return slash >= 0 ? key.slice(slash + 1) : key
 }
 
-function prettyClass(cls) {
+function labelFromTable(cls, table) {
+  if (!table || !cls) return ""
   var key = classKey(cls)
-  if (CLASS_LABELS[key]) return CLASS_LABELS[key]
+  if (table[key]) return table[key]
   var tail = classTail(cls)
-  if (CLASS_LABELS[tail]) return CLASS_LABELS[tail]
+  if (table[tail]) return table[tail]
+  var norm = normalizeKey(cls)
+  for (var k in table) {
+    if (normalizeKey(k) === norm) return table[k]
+  }
+  return ""
+}
+
+function prettyClass(cls, userNames) {
+  var custom = labelFromTable(cls, userNames)
+  if (custom) return custom
+  var builtin = labelFromTable(cls, CLASS_LABELS)
+  if (builtin) return builtin
+  var tail = classTail(cls)
   if (!tail) return ""
   return tail.charAt(0).toUpperCase() + tail.slice(1)
 }
@@ -250,31 +436,35 @@ function terminalSubtitle(title, appName, cls, entryName) {
   return text
 }
 
-function shortAppName(name, cls) {
-  var mapped = prettyClass(cls)
+function shortAppName(name, cls, userNames) {
+  var mapped = prettyClass(cls, userNames)
   if (mapped && mapped !== prettyClass("")) return mapped
+  var named = labelFromTable(name, userNames)
+  if (named) return named
   var label = String(name || "").trim()
   if (!label) return mapped
   if (/visual studio code/i.test(label)) return "Code"
   if (/onlyoffice/i.test(label)) return "Onlyoffice"
+  if (/nautilus/i.test(label)) return "Files"
   return label
 }
 
-function workspaceAppName(workspace, desktopEntries) {
-  return workspacePresentation(workspace, desktopEntries).name
+function workspaceAppName(workspace, desktopEntries, userNames) {
+  return workspacePresentation(workspace, desktopEntries, userNames).name
 }
 
-function workspaceSubtitle(workspace, desktopEntries) {
-  return workspacePresentation(workspace, desktopEntries).subtitle
+function workspaceSubtitle(workspace, desktopEntries, userNames) {
+  return workspacePresentation(workspace, desktopEntries, userNames).subtitle
 }
 
-function workspacePresentation(workspace, desktopEntries) {
+function workspacePresentation(workspace, desktopEntries, userNames) {
+  userNames = parseNameMap(userNames)
   var toplevel = primaryToplevel(workspace)
   if (!toplevel) return { name: "empty", subtitle: "", occupied: false }
 
   var cls = toplevelClass(toplevel)
   var entry = lookupEntry(cls, desktopEntries)
-  var name = shortAppName(entry ? entry.name : "", cls)
+  var name = shortAppName(entry ? entry.name : "", cls, userNames)
   if (!name) {
     var fallback = toplevelTitle(toplevel)
     name = fallback ? fallback.slice(0, 28) : "empty"
@@ -337,37 +527,35 @@ function entryMatchesClass(entry, cls) {
   return false
 }
 
-function matchToplevel(toplevel, appId, entry) {
+function matchToplevel(toplevel, appId, entry, userAliases) {
   if (!toplevel) return false
   var cls = toplevelClass(toplevel)
   if (!cls) return false
   if (classesMatch(appId, cls)) return true
-  var aliases = aliasCandidates(appId)
+  var aliases = aliasCandidates(appId, userAliases)
   for (var i = 0; i < aliases.length; i++) {
     if (classesMatch(aliases[i], cls)) return true
   }
   return entryMatchesClass(entry, cls)
 }
 
-function findRunningToplevel(appId, entry, workspaces) {
+function findRunningToplevel(appId, entry, workspaces, userAliases) {
   var tops = collectToplevels(workspaces)
   var match = null
   for (var i = 0; i < tops.length; i++) {
-    if (!matchToplevel(tops[i], appId, entry)) continue
+    if (!matchToplevel(tops[i], appId, entry, userAliases)) continue
     if (tops[i].activated) return tops[i]
     if (!match) match = tops[i]
   }
   return match
 }
 
-function pinnedAppRecord(id, desktopEntries, workspaces) {
-  var entry = lookupEntry(id, desktopEntries)
+function pinnedAppRecord(id, desktopEntries, workspaces, userNames, userAliases) {
+  var entry = lookupEntry(id, desktopEntries, userAliases)
   var resolvedId = stripDesktop((entry && entry.id) || id)
-  var running = findRunningToplevel(resolvedId, entry, workspaces)
+  var running = findRunningToplevel(resolvedId, entry, workspaces, userAliases)
   var workspaceId = running && running.workspace ? Number(running.workspace.id) : 0
-  var name = entry && entry.name ? String(entry.name) : prettyClass(resolvedId)
-  if (/visual studio code/i.test(name)) name = "VS Code"
-  if (/onlyoffice/i.test(name)) name = "Onlyoffice"
+  var name = shortAppName(entry && entry.name ? entry.name : "", (entry && entry.id) || id, userNames)
   if (!name) name = resolvedId
   return {
     id: resolvedId,
@@ -380,12 +568,14 @@ function pinnedAppRecord(id, desktopEntries, workspaces) {
   }
 }
 
-function pinnedApps(rawSetting, desktopEntries, workspaces) {
+function pinnedApps(rawSetting, desktopEntries, workspaces, userNames, userAliases) {
   var ids = parsePinnedSetting(rawSetting)
+  var names = parseNameMap(userNames)
+  var aliases = parseAliasMap(userAliases)
   var seen = ({})
   var out = []
   for (var i = 0; i < ids.length; i++) {
-    var record = pinnedAppRecord(ids[i], desktopEntries, workspaces)
+    var record = pinnedAppRecord(ids[i], desktopEntries, workspaces, names, aliases)
     var key = normalizeKey(record.id)
     if (!key || seen[key]) continue
     seen[key] = true

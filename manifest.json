@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "nordstart",
   "name": "Nordstart",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": "espen",
   "license": "MIT",
   "description": "Workspace launcher: a 3x3 grid of workspaces with running app names, plus pinned apps that jump to a running instance or open on an empty workspace",
@@ -22,7 +22,9 @@
     "defaults": {
       "workspaceCount": 9,
       "hoverOpen": true,
-      "pinnedApps": "firefox,code,thunderbird,tableplus,onlyoffice-desktopeditors"
+      "pinnedApps": "firefox,code,thunderbird,tableplus,onlyoffice-desktopeditors",
+      "appNames": "",
+      "appAliases": ""
     },
     "schema": [
       {
@@ -48,6 +50,20 @@
         "label": "Pinned apps",
         "defaultValue": "firefox,code,thunderbird,tableplus,onlyoffice-desktopeditors",
         "description": "Comma-separated desktop entry ids. Running apps switch to their workspace; the rest open on the first empty workspace."
+      },
+      {
+        "key": "appNames",
+        "type": "string",
+        "label": "App names",
+        "defaultValue": "",
+        "description": "Override display names. Use id=Name pairs (org.gnome.Nautilus=Files,firefox=Web) or a JSON object. User names win over the built-in map."
+      },
+      {
+        "key": "appAliases",
+        "type": "string",
+        "label": "App aliases",
+        "defaultValue": "",
+        "description": "Extra desktop-id aliases for pinning and running-state matching. Use id=alias|alias pairs (files=nautilus|org.gnome.Nautilus) or a JSON object."
       }
     ]
   }

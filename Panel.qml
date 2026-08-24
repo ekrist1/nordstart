@@ -26,11 +26,13 @@ Panel {
 
   readonly property int workspaceCount: Model.clampWorkspaceCount(setting("workspaceCount", 9))
   readonly property var workspaceIds: Model.workspaceIds(workspaceCount)
+  readonly property var appNames: Model.parseNameMap(setting("appNames", null))
+  readonly property var appAliases: Model.parseAliasMap(setting("appAliases", null))
   readonly property var pinned: {
     var _ = Hyprland.workspaces.values
     var __ = Hyprland.focusedWorkspace
     var ___ = Hyprland.activeToplevel
-    return Model.pinnedApps(setting("pinnedApps", null), DesktopEntries, Hyprland.workspaces)
+    return Model.pinnedApps(setting("pinnedApps", null), DesktopEntries, Hyprland.workspaces, root.appNames, root.appAliases)
   }
 
   property string focusSection: "workspaces"
@@ -88,7 +90,7 @@ Panel {
     var _ = Hyprland.workspaces.values
     var __ = Hyprland.activeToplevel
     var ___ = Hyprland.focusedWorkspace
-    return Model.workspacePresentation(lookupWorkspace(id), DesktopEntries)
+    return Model.workspacePresentation(lookupWorkspace(id), DesktopEntries, root.appNames)
   }
 
   function workspaceIsOccupied(id) {

@@ -4,7 +4,7 @@ import Quickshell.Io
 import qs.Commons
 import qs.Ui
 
-// Rectangle on the bar that opens the Nordstart workspace launcher.
+// 3x3 grid on the bar that opens the Nordstart workspace launcher.
 // Hover (optional), click, and `omarchy-shell shell toggle nordstart` all
 // drive the same panel — the clock's open/close contract, so the bar's
 // popout coordinator and the IPC shortcut share one path.
@@ -119,17 +119,37 @@ BarWidget {
       }
     }
 
-    Rectangle {
+    Item {
+      id: glyph
       anchors.centerIn: parent
-      width: Style.space(12)
-      height: Style.space(8)
-      radius: Math.max(1, Style.space(2))
-      color: button.hovered || root.opened
+      width: Style.bar.iconCanvas
+      height: Style.bar.iconCanvas
+
+      readonly property color ink: button.hovered || root.opened
         ? Style.hoverStateColor(button.foreground, Color.accent)
         : button.foreground
+      readonly property int gap: Math.max(1, Math.round(width * 0.14))
+      readonly property int cell: Math.max(2, Math.floor((width - gap * 2) / 3))
 
-      Behavior on color {
-        ColorAnimation { duration: 120; easing.type: Easing.OutCubic }
+      Grid {
+        anchors.centerIn: parent
+        columns: 3
+        rowSpacing: glyph.gap
+        columnSpacing: glyph.gap
+
+        Repeater {
+          model: 9
+          Rectangle {
+            width: glyph.cell
+            height: glyph.cell
+            radius: Math.max(1, Math.round(glyph.cell * 0.25))
+            color: glyph.ink
+
+            Behavior on color {
+              ColorAnimation { duration: 120; easing.type: Easing.OutCubic }
+            }
+          }
+        }
       }
     }
 
