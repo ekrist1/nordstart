@@ -5,12 +5,13 @@ import qs.Commons
 import qs.Ui
 
 // 3x3 grid on the bar that opens the Nordstart workspace launcher.
-// Hover (optional), click, and `omarchy-shell shell toggle nordstart` all
-// drive the same panel — the clock's open/close contract, so the bar's
-// popout coordinator and the IPC shortcut share one path.
+// Hover (optional), click, and
+// `omarchy-shell shell toggle io.github.ekrist1.nordstart` all drive the
+// same panel — the clock's open/close contract, so the bar's popout
+// coordinator and the IPC shortcut share one path.
 BarWidget {
   id: root
-  moduleName: "nordstart"
+  moduleName: "io.github.ekrist1.nordstart"
 
   readonly property bool hoverOpen: setting("hoverOpen", true) === true
   readonly property bool opened: panelLoader.item ? panelLoader.item.opened === true : false
@@ -61,7 +62,7 @@ BarWidget {
   }
 
   IpcHandler {
-    target: "nordstart"
+    target: "io.github.ekrist1.nordstart"
 
     function open(): void { root.open() }
     function close(): void { root.close() }

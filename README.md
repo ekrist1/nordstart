@@ -12,29 +12,27 @@ The modal has two halves:
   closed one to launch it on the first empty workspace.
 
 Click a workspace, press `1`–`9`, or move with the arrow keys / `hjkl` and
-press Enter.
+press Enter. Tab and Shift+Tab move to the next or previous bar panel.
 
 ## Disclaimer
 This plugin is made with Grok AI. The code is not guaranteed to be correct and may require manual review and testing. Use at your own risk.
 
 ## Install
 
-From this folder:
+```bash
+omarchy plugin add https://github.com/ekrist1/nordstart.git --enable --yes
+omarchy bar move io.github.ekrist1.nordstart --after omarchy.workspaces
+```
+
+From this folder, without git:
 
 ```bash
 omarchy plugin validate .
 mkdir -p ~/.config/omarchy/plugins
-rsync -a --delete --exclude .git ./ ~/.config/omarchy/plugins/nordstart/
+rsync -a --delete --exclude .git ./ ~/.config/omarchy/plugins/io.github.ekrist1.nordstart/
 omarchy-shell shell rescanPlugins
-omarchy plugin enable nordstart --yes
-omarchy bar move nordstart --after omarchy.workspaces
-```
-
-Or publish it as a git repo and add it the usual way:
-
-```bash
-omarchy plugin add https://github.com/you/nordstart.git --enable --yes
-omarchy bar move nordstart --after omarchy.workspaces
+omarchy plugin enable io.github.ekrist1.nordstart --yes
+omarchy bar move io.github.ekrist1.nordstart --after omarchy.workspaces
 ```
 
 ## Keyboard shortcut
@@ -45,7 +43,7 @@ Add this to `~/.config/hypr/bindings.lua`:
 o.bind(
   "SUPER + N",
   "Nordstart",
-  "omarchy-shell shell toggle nordstart"
+  "omarchy-shell shell toggle io.github.ekrist1.nordstart"
 )
 ```
 
@@ -55,7 +53,7 @@ Hyprland reloads the file on save. `SUPER+N` is free in stock Omarchy;
 You can also toggle it from a terminal:
 
 ```bash
-omarchy-shell shell toggle nordstart
+omarchy-shell shell toggle io.github.ekrist1.nordstart
 ```
 
 ## Use
@@ -65,7 +63,9 @@ omarchy-shell shell toggle nordstart
 - Click a workspace, or press its number, to switch to it.
 - Click a pinned app to focus it if it is running, or to open it on an empty
   workspace if it is not.
-- Escape or a click outside the modal closes it.
+- Escape or a click outside the modal closes it. Tab and Shift+Tab move to
+  the next or previous bar panel (clock, weather, and so on), including
+  panels in other bar sections.
 
 ## Settings
 
@@ -74,7 +74,7 @@ Tune the widget from the bar settings panel, or inline in
 
 ```json
 {
-  "id": "nordstart",
+  "id": "io.github.ekrist1.nordstart",
   "hoverOpen": true,
   "workspaceCount": 9,
   "pinnedApps": "firefox,code,thunderbird,tableplus,onlyoffice-desktopeditors",
@@ -97,7 +97,7 @@ or in `shell.json`:
 
 ```json
 {
-  "id": "nordstart",
+  "id": "io.github.ekrist1.nordstart",
   "appNames": "org.gnome.Nautilus=Files,firefox=Web,my.custom.app=Notes",
   "appAliases": "notes=my.custom.app|com.example.Notes"
 }
@@ -131,7 +131,7 @@ headless unit test cannot see.
 ## Remove
 
 ```bash
-omarchy plugin remove nordstart
+omarchy plugin remove io.github.ekrist1.nordstart
 ```
 
 That takes the widget off the bar and removes the plugin folder.

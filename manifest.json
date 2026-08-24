@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
-  "id": "nordstart",
+  "id": "io.github.ekrist1.nordstart",
   "name": "Nordstart",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "author": "espen",
   "license": "MIT",
   "description": "Workspace launcher: a 3x3 grid of workspaces with running app names, plus pinned apps that jump to a running instance or open on an empty workspace",

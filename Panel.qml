@@ -11,8 +11,8 @@ import "NordstartModel.js" as Model
 // anchor against — the same shape as the clock calendar.
 Panel {
   id: root
-  moduleName: "nordstart"
-  ipcTarget: "nordstart"
+  moduleName: "io.github.ekrist1.nordstart"
+  ipcTarget: "io.github.ekrist1.nordstart"
   manageIpc: false
 
   property var anchorItem: null
@@ -72,9 +72,53 @@ Panel {
   }
 
   function switchPanel(direction) {
-    if (root.bar && typeof root.bar.switchPanelFrom === "function")
-      return root.bar.switchPanelFrom(root.barIdentity, direction)
-    return false
+    // Omarchy's built-in Tab walk stays inside one bar section. Nordstart
+    // lives on the left next to the workspace numbers, so that walk has
+    // nowhere to go. Step through every panel on this bar surface instead,
+    // left → center → right, the same order the icons read.
+    if (!root.bar || typeof root.bar.panelNavigationSlots !== "function") {
+      if (root.bar && typeof root.bar.switchPanelFrom === "function")
+        return root.bar.switchPanelFrom(root.barIdentity, direction)
+      return false
+    }
+
+    var host = root.barIdentity
+    var window = null
+    var liveSlots = root.bar.moduleSlots || []
+    for (var i = 0; i < liveSlots.length; i++) {
+      if (liveSlots[i] && liveSlots[i].activeItem === host) {
+        if (typeof root.bar.slotWindow === "function")
+          window = root.bar.slotWindow(liveSlots[i])
+        break
+      }
+    }
+
+    var regions = ["left", "center", "right"]
+    var walk = []
+    var currentIndex = -1
+    for (var r = 0; r < regions.length; r++) {
+      var regionSlots = root.bar.panelNavigationSlots(regions[r], window)
+      for (var s = 0; s < regionSlots.length; s++) {
+        if (regionSlots[s] && regionSlots[s].activeItem === host)
+          currentIndex = walk.length
+        walk.push(regionSlots[s])
+      }
+    }
+
+    if (currentIndex < 0 || walk.length < 2) {
+      if (typeof root.bar.switchPanelFrom === "function")
+        return root.bar.switchPanelFrom(host, direction)
+      return false
+    }
+
+    var step = direction < 0 ? -1 : 1
+    var nextSlot = walk[(currentIndex + step + walk.length) % walk.length]
+    if (!nextSlot || !nextSlot.activeItem || nextSlot.activeItem === host)
+      return false
+    if (typeof nextSlot.activeItem.open !== "function")
+      return false
+    nextSlot.activeItem.open()
+    return true
   }
 
   function setCenterHoverRevealSuppressed(value) {
@@ -192,19 +236,6 @@ Panel {
     root.focusPinnedIndex = next.pinnedIndex
   }
 
-  function cycleSection(direction) {
-    root.cursorActive = true
-    if (root.pinned.length === 0) {
-      root.focusSection = "workspaces"
-      return
-    }
-    if (direction < 0) {
-      root.focusSection = root.focusSection === "pinned" ? "workspaces" : "pinned"
-    } else {
-      root.focusSection = root.focusSection === "workspaces" ? "pinned" : "workspaces"
-    }
-  }
-
   function handleDigit(text) {
     var n = parseInt(text, 10)
     if (!(n >= 1 && n <= root.workspaceCount)) return
@@ -231,7 +262,7 @@ Panel {
       onMoveRequested: function(dx, dy) { root.moveCursor(dx, dy) }
       onActivateRequested: root.activateCursor()
       onCloseRequested: root.close()
-      onTabRequested: function(direction) { root.cycleSection(direction) }
+      onTabRequested: function(direction) { root.switchPanel(direction) }
       onTextKey: function(t) {
         if (t >= "1" && t <= "9") root.handleDigit(t)
       }
