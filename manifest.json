@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "id": "nordstart",
+  "name": "Nordstart",
+  "version": "1.0.0",
+  "author": "espen",
+  "license": "MIT",
+  "description": "Workspace launcher: a 3x3 grid of workspaces with running app names, plus pinned apps that jump to a running instance or open on an empty workspace",
+  "homepage": "",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Nordstart",
+    "description": "Workspace and pinned-app launcher",
+    "category": "Compositor",
+    "allowMultiple": false,
+    "defaultSection": "left",
+    "defaults": {
+      "workspaceCount": 9,
+      "hoverOpen": true,
+      "pinnedApps": "firefox,code,thunderbird,tableplus,onlyoffice-desktopeditors"
+    },
+    "schema": [
+      {
+        "key": "hoverOpen",
+        "type": "boolean",
+        "label": "Open on hover",
+        "defaultValue": true,
+        "description": "Open the launcher when the pointer rests on the bar icon. Click and the keyboard shortcut still toggle it."
+      },
+      {
+        "key": "workspaceCount",
+        "type": "integer",
+        "label": "Workspaces shown",
+        "min": 1,
+        "max": 9,
+        "step": 1,
+        "defaultValue": 9,
+        "description": "How many workspaces appear in the grid, empty or not. Hyprland workspaces above this are ignored."
+      },
+      {
+        "key": "pinnedApps",
+        "type": "string",
+        "label": "Pinned apps",
+        "defaultValue": "firefox,code,thunderbird,tableplus,onlyoffice-desktopeditors",
+        "description": "Comma-separated desktop entry ids. Running apps switch to their workspace; the rest open on the first empty workspace."
+      }
+    ]
+  }
+}
