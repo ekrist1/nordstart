@@ -59,7 +59,8 @@ Panel {
   readonly property int installedAppCount: {
     var lib = root.appLibrary
     var _ = DesktopEntries.applications.values
-    return lib && typeof lib.sortedEntries === "function" ? lib.sortedEntries("").length : 0
+    if (!lib || typeof lib.sortedEntries !== "function") return 0
+    return Model.catalogRecords(lib.sortedEntries(""), root.appNames).length
   }
   readonly property var catalog: {
     var lib = root.appLibrary
@@ -70,12 +71,12 @@ Panel {
   readonly property bool browsingApps: root.view === "apps"
   readonly property bool confirmingSession: root.sessionConfirm !== ""
   readonly property var previewCaptureSource: {
-    var _ = Hyprland.workspaces.values
+    var ws = root.lookupWorkspace(root.focusWorkspaceId)
+    var _ = ws && ws.toplevels ? ws.toplevels.values : null
     var __ = Hyprland.activeToplevel
-    var ___ = root.focusWorkspaceId
     if (!root.opened || !root.showWorkspacePreview || root.browsingApps) return null
-    if (!root.workspaceIsOccupied(root.focusWorkspaceId)) return null
-    var top = Model.primaryToplevel(root.lookupWorkspace(root.focusWorkspaceId))
+    if (!Model.workspaceOccupied(ws)) return null
+    var top = Model.primaryToplevel(ws)
     if (!top || !top.wayland) return null
     return top.wayland
   }
@@ -250,11 +251,17 @@ Panel {
     root.close()
   }
 
+  function tabDirectionFromEvent(event) {
+    return (event.modifiers & Qt.ShiftModifier) || event.key === Qt.Key_Backtab ? -1 : 1
+  }
+
+  function sessionDialogKey(key, modifiers) {
+    if (!root.confirmingSession) return false
+    return sessionConfirmDialog.handleKey({ key: key, modifiers: modifiers || 0 })
+  }
+
   function activateCursor() {
-    if (root.confirmingSession) {
-      root.confirmSession()
-      return
-    }
+    if (root.sessionDialogKey(Qt.Key_Return)) return
     if (root.browsingApps) {
       root.launchCatalogApp(root.appCursor)
       return
@@ -268,7 +275,11 @@ Panel {
   }
 
   function moveCursor(dx, dy) {
-    if (root.confirmingSession) return
+    if (root.confirmingSession) {
+      if (dx < 0 || dy < 0) root.sessionDialogKey(Qt.Key_Left)
+      else if (dx > 0 || dy > 0) root.sessionDialogKey(Qt.Key_Right)
+      return
+    }
     if (root.browsingApps) {
       root.appCursor = Model.moveAppCursor(root.appCursor, dy !== 0 ? dy : dx, root.catalog.length)
       return
@@ -325,10 +336,7 @@ Panel {
   }
 
   function handleEscape() {
-    if (root.confirmingSession) {
-      root.sessionConfirm = ""
-      return
-    }
+    if (root.sessionDialogKey(Qt.Key_Escape)) return
     if (root.browsingApps) {
       root.leaveApps()
       return
@@ -374,6 +382,7 @@ Panel {
     if (!Model.sessionCommand(id)) return
     if (Model.sessionNeedsConfirm(id)) {
       root.sessionConfirm = id
+      sessionConfirmDialog.selectedIndex = 1
       keyCatcher.forceActiveFocus()
       return
     }
@@ -412,7 +421,10 @@ Panel {
       onMoveRequested: function(dx, dy) { root.moveCursor(dx, dy) }
       onActivateRequested: root.activateCursor()
       onCloseRequested: root.handleEscape()
-      onTabRequested: function(direction) { root.switchPanel(direction) }
+      onTabRequested: function(direction) {
+        if (root.sessionDialogKey(Qt.Key_Tab, direction < 0 ? Qt.ShiftModifier : 0)) return
+        root.switchPanel(direction)
+      }
       onTextKey: function(t) {
         if (root.confirmingSession) return
         var key = String(t || "").toLowerCase()
@@ -873,19 +885,12 @@ Panel {
             width: parent.width
             height: Style.space(30)
 
-            RowLayout {
-              visible: !root.confirmingSession
-              anchors.fill: parent
+            Row {
+              id: leftFooter
+              anchors.left: parent.left
+              anchors.verticalCenter: parent.verticalCenter
               spacing: Style.space(10)
-
-              Row {
-                id: leftFooter
-                Layout.fillWidth: false
-                Layout.alignment: Qt.AlignLeft | Qt.AlignVCenter
-                Layout.preferredWidth: Style.space(200) + (root.browsingApps ? Style.space(56) : 0)
-                Layout.maximumWidth: Style.space(200) + (root.browsingApps ? Style.space(56) : 0)
-                spacing: Style.space(10)
-                height: parent.height
+              height: parent.height
 
               Item {
                 id: searchHit
@@ -920,17 +925,24 @@ Panel {
                         root.searchQuery = ""
                         return
                       }
-                      if (text === "/") {
-                        Qt.callLater(function() {
-                          if (searchInput.text === "/") searchInput.text = ""
-                        })
-                        root.searchQuery = ""
-                        if (!root.browsingApps) root.enterApps(true)
+                      var value = text
+                      if (!root.browsingApps && value.length > 0 && value.charAt(0) === "/") {
+                        value = value.slice(1)
+                        if (searchInput.text !== value) {
+                          Qt.callLater(function() {
+                            var next = searchInput.text
+                            if (next.length > 0 && next.charAt(0) === "/")
+                              searchInput.text = next.slice(1)
+                          })
+                        }
+                        root.searchQuery = value
+                        root.appCursor = 0
+                        root.enterApps(true)
                         return
                       }
-                      root.searchQuery = text
+                      root.searchQuery = value
                       root.appCursor = 0
-                      if (text.length > 0 && !root.browsingApps) root.enterApps(true)
+                      if (value.length > 0 && !root.browsingApps) root.enterApps(true)
                     }
                     onActiveFocusChanged: if (activeFocus && !root.browsingApps) root.enterApps(true)
 
@@ -957,7 +969,7 @@ Panel {
                         root.togglePinnedAtCursor()
                         event.accepted = true
                       } else if (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) {
-                        root.switchPanel((event.modifiers & Qt.ShiftModifier) || event.key === Qt.Key_Backtab ? -1 : 1)
+                        root.switchPanel(root.tabDirectionFromEvent(event))
                         event.accepted = true
                       }
                     }
@@ -1000,7 +1012,7 @@ Panel {
               Item {
                 id: footerPin
                 visible: root.browsingApps
-                width: footerPinRow.implicitWidth
+                width: visible ? footerPinRow.implicitWidth : 0
                 height: parent.height
 
                 Row {
@@ -1035,46 +1047,47 @@ Panel {
                   onClicked: root.togglePinnedAtCursor()
                 }
               }
-              }
+            }
 
-              Item {
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                Layout.minimumWidth: Style.space(16)
-              }
+            Row {
+              id: rightFooter
+              anchors.right: parent.right
+              anchors.verticalCenter: parent.verticalCenter
+              spacing: Style.space(10)
+              height: parent.height
 
               Text {
                 visible: !root.browsingApps
+                anchors.verticalCenter: parent.verticalCenter
                 text: root.installedAppCount + " apps"
                 color: root.dimForeground
                 font.family: root.contentFontFamily
                 font.pixelSize: Style.font.bodySmall
-                Layout.alignment: Qt.AlignVCenter
-                Layout.preferredWidth: visible ? implicitWidth : 0
-                Layout.maximumWidth: visible ? 65535 : 0
               }
 
-              Row {
+              Item {
                 visible: !root.browsingApps
-                spacing: Style.space(6)
-                Layout.alignment: Qt.AlignVCenter
-                Layout.preferredWidth: visible ? implicitWidth : 0
-                Layout.maximumWidth: visible ? 65535 : 0
+                width: visible ? allAppsRow.implicitWidth : 0
+                height: parent.height
 
-                Text {
-                  text: "a"
-                  color: root.keyHintForeground
-                  font.family: root.contentFontFamily
-                  font.pixelSize: Style.font.subtitle
+                Row {
+                  id: allAppsRow
+                  spacing: Style.space(6)
                   anchors.verticalCenter: parent.verticalCenter
-                }
 
-                Text {
-                  text: "all apps"
-                  color: allAppsMouse.containsMouse ? root.contentForeground : root.dimForeground
-                  font.family: root.contentFontFamily
-                  font.pixelSize: Style.font.bodySmall
-                  anchors.verticalCenter: parent.verticalCenter
+                  Text {
+                    text: "a"
+                    color: root.keyHintForeground
+                    font.family: root.contentFontFamily
+                    font.pixelSize: Style.font.subtitle
+                  }
+
+                  Text {
+                    text: "all apps"
+                    color: allAppsMouse.containsMouse ? root.contentForeground : root.dimForeground
+                    font.family: root.contentFontFamily
+                    font.pixelSize: Style.font.bodySmall
+                  }
                 }
 
                 MouseArea {
@@ -1087,67 +1100,47 @@ Panel {
               }
 
               Rectangle {
-                Layout.preferredWidth: Style.spacing.hairline
-                Layout.preferredHeight: Style.space(16)
-                Layout.alignment: Qt.AlignVCenter
+                visible: !root.browsingApps
+                width: Style.spacing.hairline
+                height: Style.space(16)
+                anchors.verticalCenter: parent.verticalCenter
                 color: root.contentForeground
                 opacity: 0.18
               }
 
-              Row {
-                Layout.alignment: Qt.AlignVCenter
-                spacing: Style.space(4)
-
-                SessionButton {
-                  glyph: "󰍃"
-                  label: "Log out"
-                  onActivated: root.requestSession("logout")
-                }
-                SessionButton {
-                  glyph: "󰜉"
-                  label: "Reboot"
-                  onActivated: root.requestSession("reboot")
-                }
-                SessionButton {
-                  glyph: "󰐥"
-                  label: "Power off"
-                  danger: true
-                  onActivated: root.requestSession("shutdown")
-                }
+              SessionButton {
+                glyph: "󰍃"
+                label: "Log out"
+                onActivated: root.requestSession("logout")
               }
-            }
-
-            Item {
-              visible: root.confirmingSession
-              anchors.fill: parent
-
-              Row {
-                anchors.verticalCenter: parent.verticalCenter
-                spacing: Style.space(10)
-
-                Text {
-                  text: Model.sessionPrompt(root.sessionConfirm)
-                  color: root.sessionConfirm === "shutdown" ? Color.urgent : root.contentForeground
-                  font.family: root.contentFontFamily
-                  font.pixelSize: Style.font.subtitle
-                }
-
-                Text {
-                  text: "↵ confirm · esc cancel"
-                  color: root.dimForeground
-                  font.family: root.contentFontFamily
-                  font.pixelSize: Style.font.bodySmall
-                  anchors.verticalCenter: parent.verticalCenter
-                }
+              SessionButton {
+                glyph: "󰜉"
+                label: "Reboot"
+                onActivated: root.requestSession("reboot")
               }
-
-              MouseArea {
-                anchors.fill: parent
-                cursorShape: Qt.PointingHandCursor
-                onClicked: root.confirmSession()
+              SessionButton {
+                glyph: "󰐥"
+                label: "Power off"
+                danger: true
+                onActivated: root.requestSession("shutdown")
               }
             }
           }
+      }
+
+      ConfirmDialog {
+        id: sessionConfirmDialog
+        anchors.fill: parent
+        z: 20
+        opened: root.confirmingSession
+        message: Model.sessionPrompt(root.sessionConfirm)
+        confirmText: Model.sessionConfirmText(root.sessionConfirm)
+        background: Color.popups.background
+        foreground: root.contentForeground
+        selectedText: Color.accent
+        fontFamily: root.contentFontFamily
+        onCanceled: root.sessionConfirm = ""
+        onConfirmed: root.confirmSession()
       }
     }
   }

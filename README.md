@@ -96,7 +96,8 @@ Tune the widget from the bar settings panel, or inline in
 `pinnedApps` is a comma-separated list of desktop entry ids. Installed apps
 are resolved with a few aliases (`code` also matches VS Code / Codium, `files`
 matches Nautilus). Apps that are not installed are skipped. Pin or unpin from
-the all-apps list to update this list in `shell.json`.
+the all-apps list to update this list in `shell.json`. A blank value falls
+back to the default pins; `none` means no pins.
 
 Nautilus windows show as **Files**. Other common desktop classes (Chrome,
 Telegram, Spotify, Settings, and so on) have built-in friendly names too.

@@ -146,6 +146,8 @@ function clampWorkspaceCount(value) {
   return Math.max(1, Math.min(9, n))
 }
 
+var EMPTY_PINNED_SENTINEL = "none"
+
 function stripDesktop(id) {
   var value = String(id || "").trim()
   if (value.slice(-8).toLowerCase() === ".desktop") value = value.slice(0, -8)
@@ -154,6 +156,16 @@ function stripDesktop(id) {
 
 function normalizeKey(value) {
   return stripDesktop(value).toLowerCase().replace(/[^a-z0-9]+/g, "")
+}
+
+function idKey(value) {
+  return stripDesktop(value).toLowerCase()
+}
+
+function idsEqual(left, right) {
+  var a = idKey(left)
+  var b = idKey(right)
+  return !!a && a === b
 }
 
 function parsePinnedSetting(raw) {
@@ -169,7 +181,8 @@ function parsePinnedSetting(raw) {
   }
 
   var text = String(raw).trim()
-  if (!text) return []
+  if (!text) return DEFAULT_PINNED.slice()
+  if (text.toLowerCase() === EMPTY_PINNED_SENTINEL || text === "-") return []
 
   var parts = text.split(/[,;\n]+/)
   var ids = []
@@ -177,7 +190,7 @@ function parsePinnedSetting(raw) {
     var id = stripDesktop(parts[i])
     if (id) ids.push(id)
   }
-  return ids
+  return ids.length ? ids : DEFAULT_PINNED.slice()
 }
 
 function formatPinnedSetting(ids) {
@@ -186,36 +199,39 @@ function formatPinnedSetting(ids) {
   var list = ids || []
   for (var i = 0; i < list.length; i++) {
     var id = stripDesktop(list[i])
-    var key = normalizeKey(id)
+    var key = idKey(id)
     if (!key || seen[key]) continue
     seen[key] = true
     out.push(id)
   }
-  return out.join(",")
+  return out.length ? out.join(",") : EMPTY_PINNED_SENTINEL
 }
 
 function pinnedIdMatches(appId, pinnedId, userAliases) {
   if (!appId || !pinnedId) return false
-  if (classesMatch(appId, pinnedId)) return true
+  if (idsEqual(appId, pinnedId)) return true
   var aliases = aliasCandidates(pinnedId, userAliases)
   for (var i = 0; i < aliases.length; i++) {
-    if (classesMatch(appId, aliases[i])) return true
+    if (idsEqual(appId, aliases[i])) return true
   }
   aliases = aliasCandidates(appId, userAliases)
   for (var j = 0; j < aliases.length; j++) {
-    if (classesMatch(pinnedId, aliases[j])) return true
+    if (idsEqual(pinnedId, aliases[j])) return true
+  }
+  return false
+}
+
+function idIsPinned(appId, pinnedIds, userAliases) {
+  var id = stripDesktop(appId)
+  if (!id || !pinnedIds) return false
+  for (var i = 0; i < pinnedIds.length; i++) {
+    if (pinnedIdMatches(id, pinnedIds[i], userAliases)) return true
   }
   return false
 }
 
 function isPinnedApp(appId, rawSetting, userAliases) {
-  var id = stripDesktop(appId)
-  if (!id) return false
-  var ids = parsePinnedSetting(rawSetting)
-  for (var i = 0; i < ids.length; i++) {
-    if (pinnedIdMatches(id, ids[i], userAliases)) return true
-  }
-  return false
+  return idIsPinned(appId, parsePinnedSetting(rawSetting), userAliases)
 }
 
 function togglePinnedSetting(rawSetting, appId, userAliases) {
@@ -636,7 +652,7 @@ function pinnedApps(rawSetting, desktopEntries, workspaces, userNames, userAlias
   var out = []
   for (var i = 0; i < ids.length; i++) {
     var record = pinnedAppRecord(ids[i], desktopEntries, workspaces, names, aliases)
-    var key = normalizeKey(record.id)
+    var key = idKey(record.id)
     if (!key || seen[key]) continue
     seen[key] = true
     if (record.missing && !record.running) continue
@@ -657,7 +673,7 @@ function cursorIndex(section, workspaceId, pinnedIndex, workspaceCount, pinnedCo
 
 function catalogRecords(rows, userNames, rawPinned, userAliases) {
   var names = parseNameMap(userNames)
-  var checkPinned = rawPinned !== undefined
+  var pinnedIds = rawPinned !== undefined ? parsePinnedSetting(rawPinned) : null
   var out = []
   var seen = ({})
   if (!rows) return out
@@ -667,7 +683,7 @@ function catalogRecords(rows, userNames, rawPinned, userAliases) {
     if (!entry) continue
     var id = stripDesktop(entry.id)
     if (!id) continue
-    var key = normalizeKey(id)
+    var key = idKey(id)
     if (!key || seen[key]) continue
     seen[key] = true
     var name = shortAppName(entry.name || "", id, names)
@@ -676,7 +692,7 @@ function catalogRecords(rows, userNames, rawPinned, userAliases) {
       id: id,
       name: name,
       icon: entry.icon ? String(entry.icon) : id,
-      pinned: checkPinned && isPinnedApp(id, rawPinned, userAliases)
+      pinned: pinnedIds ? idIsPinned(id, pinnedIds, userAliases) : false
     })
   }
   return out
@@ -690,22 +706,34 @@ function moveAppCursor(index, delta, count) {
   return next
 }
 
+var SESSION_ACTIONS = {
+  logout: { command: "omarchy-system-logout", prompt: "log out?", confirm: false, confirmText: "Log out" },
+  reboot: { command: "omarchy-system-reboot", prompt: "reboot?", confirm: true, confirmText: "Reboot" },
+  shutdown: { command: "omarchy-system-shutdown", prompt: "power off?", confirm: true, confirmText: "Power off" }
+}
+
+function sessionAction(id) {
+  return SESSION_ACTIONS[id] || null
+}
+
 function sessionCommand(id) {
-  if (id === "logout") return "omarchy-system-logout"
-  if (id === "reboot") return "omarchy-system-reboot"
-  if (id === "shutdown") return "omarchy-system-shutdown"
-  return ""
+  var action = sessionAction(id)
+  return action ? action.command : ""
 }
 
 function sessionPrompt(id) {
-  if (id === "reboot") return "reboot?"
-  if (id === "shutdown") return "power off?"
-  if (id === "logout") return "log out?"
-  return ""
+  var action = sessionAction(id)
+  return action ? action.prompt : ""
+}
+
+function sessionConfirmText(id) {
+  var action = sessionAction(id)
+  return action ? action.confirmText : "Confirm"
 }
 
 function sessionNeedsConfirm(id) {
-  return id === "reboot" || id === "shutdown"
+  var action = sessionAction(id)
+  return !!(action && action.confirm)
 }
 
 function moveCursor(section, workspaceId, pinnedIndex, dx, dy, workspaceCount, pinnedCount) {

@@ -150,10 +150,11 @@ test("catalogRecords uses friendly names and skips duplicates", () => {
   assert.equal(apps[1].name, "Firefox")
 })
 
-test("parsePinnedSetting treats missing as defaults and empty as none", () => {
+test("parsePinnedSetting treats missing and blank as defaults", () => {
   const defaults = Model.parsePinnedSetting(null)
   assert.ok(defaults.includes("firefox"))
-  assert.equal(Model.parsePinnedSetting("").length, 0)
+  assert.equal(Model.parsePinnedSetting("").length, defaults.length)
+  assert.equal(Model.parsePinnedSetting("none").length, 0)
   assert.equal(Model.parsePinnedSetting([]).length, 0)
   const parsed = Model.parsePinnedSetting("a, b")
   assert.equal(parsed.length, 2)
@@ -176,11 +177,22 @@ test("togglePinnedSetting pins and unpins, including aliases", () => {
 
   const files = Model.togglePinnedSetting("files", "org.gnome.Nautilus")
   assert.equal(files.pinned, false)
-  assert.equal(files.setting, "")
+  assert.equal(files.setting, "none")
 
-  const fromEmpty = Model.togglePinnedSetting("", "kitty")
+  const fromEmpty = Model.togglePinnedSetting("none", "kitty")
   assert.equal(fromEmpty.pinned, true)
   assert.equal(fromEmpty.setting, "kitty")
+})
+
+test("unpinning code-insiders does not drop a code pin", () => {
+  assert.equal(Model.pinnedIdMatches("code-insiders", "code"), false)
+  assert.equal(Model.isPinnedApp("code-insiders", "code"), false)
+  const added = Model.togglePinnedSetting("code,firefox", "code-insiders")
+  assert.equal(added.pinned, true)
+  assert.equal(added.setting, "code,firefox,code-insiders")
+  const removed = Model.togglePinnedSetting("code,code-insiders", "code-insiders")
+  assert.equal(removed.pinned, false)
+  assert.equal(removed.setting, "code")
 })
 
 test("catalogRecords marks pinned apps from the setting", () => {
@@ -194,6 +206,17 @@ test("catalogRecords marks pinned apps from the setting", () => {
   assert.equal(Model.isPinnedApp("org.gnome.Nautilus", "files"), true)
 })
 
+test("catalogRecords keeps distinct ids that only differ by punctuation", () => {
+  const rows = [
+    { id: "foo.bar", name: "Foo Bar" },
+    { id: "foo-bar", name: "Foo-Bar" }
+  ]
+  const apps = Model.catalogRecords(rows)
+  assert.equal(apps.length, 2)
+  assert.equal(apps[0].id, "foo.bar")
+  assert.equal(apps[1].id, "foo-bar")
+})
+
 test("app list cursor clamps and session commands map", () => {
   assert.equal(Model.moveAppCursor(0, -1, 10), 0)
   assert.equal(Model.moveAppCursor(3, 2, 10), 5)
@@ -201,6 +224,7 @@ test("app list cursor clamps and session commands map", () => {
   assert.equal(Model.moveAppCursor(0, 1, 0), 0)
   assert.equal(Model.sessionCommand("shutdown"), "omarchy-system-shutdown")
   assert.equal(Model.sessionPrompt("shutdown"), "power off?")
+  assert.equal(Model.sessionConfirmText("shutdown"), "Power off")
   assert.equal(Model.sessionNeedsConfirm("reboot"), true)
   assert.equal(Model.sessionNeedsConfirm("logout"), false)
 })
