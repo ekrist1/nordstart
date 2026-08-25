@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Layouts
 import Quickshell
 import Quickshell.Hyprland
+import Quickshell.Wayland
 import qs.Commons
 import qs.Ui
 import "NordstartModel.js" as Model
@@ -50,7 +51,9 @@ Panel {
   readonly property int workspaceRowHeight: Style.space(36)
   readonly property int badgeSize: Style.space(22)
   readonly property int pinnedRowHeight: Style.space(34)
-  readonly property int sidebarWidth: Style.space(184)
+  readonly property bool showWorkspacePreview: setting("showWorkspacePreview", true) === true
+  readonly property int sidebarWidth: showWorkspacePreview ? Style.space(260) : Style.space(156)
+  readonly property int previewHeight: Style.space(148)
   readonly property int paneMinHeight: Style.space(248)
   readonly property var appLibrary: bar && bar.shell ? bar.shell.appLibrary : null
   readonly property int installedAppCount: {
@@ -66,6 +69,17 @@ Panel {
   }
   readonly property bool browsingApps: root.view === "apps"
   readonly property bool confirmingSession: root.sessionConfirm !== ""
+  readonly property var previewCaptureSource: {
+    var _ = Hyprland.workspaces.values
+    var __ = Hyprland.activeToplevel
+    var ___ = root.focusWorkspaceId
+    if (!root.opened || !root.showWorkspacePreview || root.browsingApps) return null
+    if (!root.workspaceIsOccupied(root.focusWorkspaceId)) return null
+    var top = Model.primaryToplevel(root.lookupWorkspace(root.focusWorkspaceId))
+    if (!top || !top.wayland) return null
+    return top.wayland
+  }
+  readonly property bool previewLive: root.opened && root.showWorkspacePreview && !root.browsingApps && root.previewCaptureSource !== null
 
   function open() {
     Hyprland.refreshWorkspaces()
@@ -367,7 +381,7 @@ Panel {
     open: root.opened
     centerOnBar: true
     focusTarget: keyCatcher
-    contentWidth: panel.fittedContentWidth(Style.space(720))
+    contentWidth: panel.fittedContentWidth(Style.space(root.showWorkspacePreview ? 820 : 720))
     contentHeight: panel.fittedContentHeight(bodyColumn.implicitHeight)
 
     PanelKeyCatcher {
@@ -548,12 +562,67 @@ Panel {
 
           Column {
             id: pinnedColumn
-            Layout.preferredWidth: Style.space(156)
-            Layout.maximumWidth: Style.space(156)
+            Layout.preferredWidth: root.sidebarWidth
+            Layout.maximumWidth: root.sidebarWidth
             Layout.rightMargin: Style.space(10)
             Layout.alignment: Qt.AlignTop
             spacing: Style.space(14)
             clip: true
+
+            Item {
+              id: previewPane
+              visible: root.showWorkspacePreview
+              width: parent.width
+              height: root.previewHeight
+              clip: true
+
+              Rectangle {
+                anchors.fill: parent
+                radius: Style.cornerRadius
+                color: Qt.rgba(root.contentForeground.r, root.contentForeground.g, root.contentForeground.b, 0.06)
+              }
+
+              ScreencopyView {
+                id: previewCapture
+                anchors.centerIn: parent
+                captureSource: root.previewCaptureSource
+                live: root.previewLive
+                paintCursor: false
+                constraintSize.width: parent.width - Style.space(6)
+                constraintSize.height: parent.height - Style.space(6)
+                visible: hasContent
+              }
+
+              Text {
+                visible: !root.workspaceIsOccupied(root.focusWorkspaceId)
+                anchors.centerIn: parent
+                text: "empty"
+                color: root.dimForeground
+                font.family: root.contentFontFamily
+                font.pixelSize: Style.font.subtitle
+              }
+
+              Text {
+                visible: root.workspaceIsOccupied(root.focusWorkspaceId) && !previewCapture.hasContent
+                width: parent.width - Style.space(16)
+                anchors.centerIn: parent
+                horizontalAlignment: Text.AlignHCenter
+                text: {
+                  var info = root.workspaceInfo(root.focusWorkspaceId)
+                  return (info && info.name) ? info.name : ""
+                }
+                color: root.dimForeground
+                font.family: root.contentFontFamily
+                font.pixelSize: Style.font.subtitle
+                elide: Text.ElideRight
+              }
+
+              MouseArea {
+                anchors.fill: parent
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.activateWorkspace(root.focusWorkspaceId)
+              }
+            }
 
             Text {
               text: "Pinned apps"

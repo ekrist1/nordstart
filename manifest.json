@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.ekrist1.nordstart",
   "name": "Nordstart",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "author": "espen",
   "license": "MIT",
   "description": "Workspace launcher with pinned apps, an installed-app search, and session actions",
@@ -22,6 +22,7 @@
     "defaults": {
       "workspaceCount": 9,
       "hoverOpen": true,
+      "showWorkspacePreview": true,
       "pinnedApps": "firefox,code,thunderbird,tableplus,onlyoffice-desktopeditors",
       "appNames": "",
       "appAliases": ""
@@ -33,6 +34,13 @@
         "label": "Open on hover",
         "defaultValue": true,
         "description": "Open the launcher when the pointer rests on the bar icon. Click and the keyboard shortcut still toggle it."
+      },
+      {
+        "key": "showWorkspacePreview",
+        "type": "boolean",
+        "label": "Workspace preview",
+        "defaultValue": true,
+        "description": "Show a live preview of the selected workspace's window on the right. Turn this off if capture is slow or unsupported."
       },
       {
         "key": "workspaceCount",

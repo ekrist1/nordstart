@@ -60,7 +60,8 @@ omarchy-shell shell toggle io.github.ekrist1.nordstart
 
 - Hover or click the grid icon on the bar (to the right of the workspace
   numbers) to open the launcher.
-- Click a workspace, or press its number, to switch to it.
+- Click a workspace, or press its number, to switch to it. With workspace
+  preview on, the right side shows a live view of that workspace's window.
 - Click a pinned app to focus it if it is running, or to open it on an empty
   workspace if it is not.
 - Press `q` or `/` to jump to search, or `a` to open the all-apps list.
@@ -82,6 +83,7 @@ Tune the widget from the bar settings panel, or inline in
 {
   "id": "io.github.ekrist1.nordstart",
   "hoverOpen": true,
+  "showWorkspacePreview": true,
   "workspaceCount": 9,
   "pinnedApps": "firefox,code,thunderbird,tableplus,onlyoffice-desktopeditors",
   "appNames": "",
