@@ -63,6 +63,12 @@ omarchy-shell shell toggle io.github.ekrist1.nordstart
 - Click a workspace, or press its number, to switch to it.
 - Click a pinned app to focus it if it is running, or to open it on an empty
   workspace if it is not.
+- Press `q` or `/` to jump to search, or `a` to open the all-apps list.
+  Click **search apps...** or **all apps** for the same. Type to filter,
+  Enter to launch, Esc to return to workspaces (Esc again closes the
+  launcher).
+- The footer icons log out immediately, and ask for confirmation before
+  reboot or power off (`Enter` confirms, `Esc` cancels).
 - Escape or a click outside the modal closes it. Tab and Shift+Tab move to
   the next or previous bar panel (clock, weather, and so on), including
   panels in other bar sections.

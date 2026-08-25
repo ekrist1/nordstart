@@ -595,6 +595,57 @@ function cursorIndex(section, workspaceId, pinnedIndex, workspaceCount, pinnedCo
   return { section: "workspaces", workspaceId: id, pinnedIndex: pinnedIndex }
 }
 
+function catalogRecords(rows, userNames) {
+  var names = parseNameMap(userNames)
+  var out = []
+  var seen = ({})
+  if (!rows) return out
+  for (var i = 0; i < rows.length; i++) {
+    var row = rows[i]
+    var entry = row && row.entry ? row.entry : row
+    if (!entry) continue
+    var id = stripDesktop(entry.id)
+    if (!id) continue
+    var key = normalizeKey(id)
+    if (!key || seen[key]) continue
+    seen[key] = true
+    var name = shortAppName(entry.name || "", id, names)
+    if (!name) name = String(entry.name || id)
+    out.push({
+      id: id,
+      name: name,
+      icon: entry.icon ? String(entry.icon) : id
+    })
+  }
+  return out
+}
+
+function moveAppCursor(index, delta, count) {
+  if (!(count > 0)) return 0
+  var next = Math.trunc(Number(index)) + Math.trunc(Number(delta))
+  if (next < 0) return 0
+  if (next > count - 1) return count - 1
+  return next
+}
+
+function sessionCommand(id) {
+  if (id === "logout") return "omarchy-system-logout"
+  if (id === "reboot") return "omarchy-system-reboot"
+  if (id === "shutdown") return "omarchy-system-shutdown"
+  return ""
+}
+
+function sessionPrompt(id) {
+  if (id === "reboot") return "reboot?"
+  if (id === "shutdown") return "power off?"
+  if (id === "logout") return "log out?"
+  return ""
+}
+
+function sessionNeedsConfirm(id) {
+  return id === "reboot" || id === "shutdown"
+}
+
 function moveCursor(section, workspaceId, pinnedIndex, dx, dy, workspaceCount, pinnedCount) {
   var columns = 3
   if (section === "pinned") {

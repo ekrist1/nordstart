@@ -135,3 +135,27 @@ test("first empty workspace and clamp", () => {
   const spaces = { values: [workspace(1, [toplevel("firefox", "x")]), workspace(2, [])] }
   assert.equal(Model.firstEmptyWorkspace(9, spaces), 2)
 })
+
+test("catalogRecords uses friendly names and skips duplicates", () => {
+  const rows = [
+    { entry: { id: "org.gnome.Nautilus.desktop", name: "Nautilus", icon: "org.gnome.Nautilus" } },
+    { entry: { id: "org.gnome.Nautilus", name: "Files" } },
+    { id: "firefox", name: "Firefox Web Browser", icon: "firefox" }
+  ]
+  const apps = Model.catalogRecords(rows)
+  assert.equal(apps.length, 2)
+  assert.equal(apps[0].name, "Files")
+  assert.equal(apps[0].id, "org.gnome.Nautilus")
+  assert.equal(apps[1].name, "Firefox")
+})
+
+test("app list cursor clamps and session commands map", () => {
+  assert.equal(Model.moveAppCursor(0, -1, 10), 0)
+  assert.equal(Model.moveAppCursor(3, 2, 10), 5)
+  assert.equal(Model.moveAppCursor(9, 1, 10), 9)
+  assert.equal(Model.moveAppCursor(0, 1, 0), 0)
+  assert.equal(Model.sessionCommand("shutdown"), "omarchy-system-shutdown")
+  assert.equal(Model.sessionPrompt("shutdown"), "power off?")
+  assert.equal(Model.sessionNeedsConfirm("reboot"), true)
+  assert.equal(Model.sessionNeedsConfirm("logout"), false)
+})
