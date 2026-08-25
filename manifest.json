@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.ekrist1.nordstart",
   "name": "Nordstart",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "author": "espen",
   "license": "MIT",
   "description": "Workspace launcher with pinned apps, an installed-app search, and session actions",
@@ -57,7 +57,7 @@
         "type": "string",
         "label": "Pinned apps",
         "defaultValue": "firefox,code,thunderbird,tableplus,onlyoffice-desktopeditors",
-        "description": "Comma-separated desktop entry ids. Running apps switch to their workspace; the rest open on the first empty workspace."
+        "description": "Comma-separated desktop entry ids. Running apps switch to their workspace; the rest open on the first empty workspace. Pin or unpin from the all-apps list to change this."
       },
       {
         "key": "appNames",

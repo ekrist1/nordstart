@@ -146,7 +146,52 @@ test("catalogRecords uses friendly names and skips duplicates", () => {
   assert.equal(apps.length, 2)
   assert.equal(apps[0].name, "Files")
   assert.equal(apps[0].id, "org.gnome.Nautilus")
+  assert.equal(apps[0].pinned, false)
   assert.equal(apps[1].name, "Firefox")
+})
+
+test("parsePinnedSetting treats missing as defaults and empty as none", () => {
+  const defaults = Model.parsePinnedSetting(null)
+  assert.ok(defaults.includes("firefox"))
+  assert.equal(Model.parsePinnedSetting("").length, 0)
+  assert.equal(Model.parsePinnedSetting([]).length, 0)
+  const parsed = Model.parsePinnedSetting("a, b")
+  assert.equal(parsed.length, 2)
+  assert.equal(parsed[0], "a")
+  assert.equal(parsed[1], "b")
+})
+
+test("togglePinnedSetting pins and unpins, including aliases", () => {
+  const added = Model.togglePinnedSetting("firefox,code", "org.gnome.Nautilus")
+  assert.equal(added.pinned, true)
+  assert.equal(added.setting, "firefox,code,org.gnome.Nautilus")
+
+  const removed = Model.togglePinnedSetting("firefox,code", "firefox")
+  assert.equal(removed.pinned, false)
+  assert.equal(removed.setting, "code")
+
+  const aliasOff = Model.togglePinnedSetting("firefox,code", "org.mozilla.firefox")
+  assert.equal(aliasOff.pinned, false)
+  assert.equal(aliasOff.setting, "code")
+
+  const files = Model.togglePinnedSetting("files", "org.gnome.Nautilus")
+  assert.equal(files.pinned, false)
+  assert.equal(files.setting, "")
+
+  const fromEmpty = Model.togglePinnedSetting("", "kitty")
+  assert.equal(fromEmpty.pinned, true)
+  assert.equal(fromEmpty.setting, "kitty")
+})
+
+test("catalogRecords marks pinned apps from the setting", () => {
+  const rows = [
+    { id: "firefox", name: "Firefox Web Browser" },
+    { id: "kitty", name: "Kitty" }
+  ]
+  const apps = Model.catalogRecords(rows, null, "firefox,code")
+  assert.equal(apps[0].pinned, true)
+  assert.equal(apps[1].pinned, false)
+  assert.equal(Model.isPinnedApp("org.gnome.Nautilus", "files"), true)
 })
 
 test("app list cursor clamps and session commands map", () => {

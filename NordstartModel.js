@@ -157,17 +157,19 @@ function normalizeKey(value) {
 }
 
 function parsePinnedSetting(raw) {
+  if (raw == null) return DEFAULT_PINNED.slice()
+
   if (Array.isArray(raw)) {
     var fromArray = []
     for (var a = 0; a < raw.length; a++) {
       var item = stripDesktop(raw[a])
       if (item) fromArray.push(item)
     }
-    return fromArray.length ? fromArray : DEFAULT_PINNED.slice()
+    return fromArray
   }
 
-  var text = String(raw == null ? "" : raw).trim()
-  if (!text) return DEFAULT_PINNED.slice()
+  var text = String(raw).trim()
+  if (!text) return []
 
   var parts = text.split(/[,;\n]+/)
   var ids = []
@@ -175,7 +177,65 @@ function parsePinnedSetting(raw) {
     var id = stripDesktop(parts[i])
     if (id) ids.push(id)
   }
-  return ids.length ? ids : DEFAULT_PINNED.slice()
+  return ids
+}
+
+function formatPinnedSetting(ids) {
+  var out = []
+  var seen = ({})
+  var list = ids || []
+  for (var i = 0; i < list.length; i++) {
+    var id = stripDesktop(list[i])
+    var key = normalizeKey(id)
+    if (!key || seen[key]) continue
+    seen[key] = true
+    out.push(id)
+  }
+  return out.join(",")
+}
+
+function pinnedIdMatches(appId, pinnedId, userAliases) {
+  if (!appId || !pinnedId) return false
+  if (classesMatch(appId, pinnedId)) return true
+  var aliases = aliasCandidates(pinnedId, userAliases)
+  for (var i = 0; i < aliases.length; i++) {
+    if (classesMatch(appId, aliases[i])) return true
+  }
+  aliases = aliasCandidates(appId, userAliases)
+  for (var j = 0; j < aliases.length; j++) {
+    if (classesMatch(pinnedId, aliases[j])) return true
+  }
+  return false
+}
+
+function isPinnedApp(appId, rawSetting, userAliases) {
+  var id = stripDesktop(appId)
+  if (!id) return false
+  var ids = parsePinnedSetting(rawSetting)
+  for (var i = 0; i < ids.length; i++) {
+    if (pinnedIdMatches(id, ids[i], userAliases)) return true
+  }
+  return false
+}
+
+function togglePinnedSetting(rawSetting, appId, userAliases) {
+  var id = stripDesktop(appId)
+  var ids = parsePinnedSetting(rawSetting)
+  var next = []
+  var found = false
+  for (var i = 0; i < ids.length; i++) {
+    if (pinnedIdMatches(id, ids[i], userAliases)) {
+      found = true
+      continue
+    }
+    next.push(ids[i])
+  }
+  if (!found && id) next.push(id)
+  return {
+    pinned: !found,
+    ids: next,
+    setting: formatPinnedSetting(next)
+  }
 }
 
 function parseNameMap(raw) {
@@ -595,8 +655,9 @@ function cursorIndex(section, workspaceId, pinnedIndex, workspaceCount, pinnedCo
   return { section: "workspaces", workspaceId: id, pinnedIndex: pinnedIndex }
 }
 
-function catalogRecords(rows, userNames) {
+function catalogRecords(rows, userNames, rawPinned, userAliases) {
   var names = parseNameMap(userNames)
+  var checkPinned = rawPinned !== undefined
   var out = []
   var seen = ({})
   if (!rows) return out
@@ -614,7 +675,8 @@ function catalogRecords(rows, userNames) {
     out.push({
       id: id,
       name: name,
-      icon: entry.icon ? String(entry.icon) : id
+      icon: entry.icon ? String(entry.icon) : id,
+      pinned: checkPinned && isPinnedApp(id, rawPinned, userAliases)
     })
   }
   return out

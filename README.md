@@ -67,7 +67,9 @@ omarchy-shell shell toggle io.github.ekrist1.nordstart
 - Press `q` or `/` to jump to search, or `a` to open the all-apps list.
   Click **search apps...** or **all apps** for the same. Type to filter,
   Enter to launch, Esc to return to workspaces (Esc again closes the
-  launcher).
+  launcher). Press `p` (or click **pin** / **unpin**) to pin the selected
+  app to the launcher, or to take it off. That writes `pinnedApps` in
+  `shell.json`.
 - The footer icons log out immediately, and ask for confirmation before
   reboot or power off (`Enter` confirms, `Esc` cancels).
 - Escape or a click outside the modal closes it. Tab and Shift+Tab move to
@@ -93,7 +95,8 @@ Tune the widget from the bar settings panel, or inline in
 
 `pinnedApps` is a comma-separated list of desktop entry ids. Installed apps
 are resolved with a few aliases (`code` also matches VS Code / Codium, `files`
-matches Nautilus). Apps that are not installed are skipped.
+matches Nautilus). Apps that are not installed are skipped. Pin or unpin from
+the all-apps list to update this list in `shell.json`.
 
 Nautilus windows show as **Files**. Other common desktop classes (Chrome,
 Telegram, Spotify, Settings, and so on) have built-in friendly names too.

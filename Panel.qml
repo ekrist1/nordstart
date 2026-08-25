@@ -65,7 +65,7 @@ Panel {
     var lib = root.appLibrary
     var _ = DesktopEntries.applications.values
     if (!lib || typeof lib.sortedEntries !== "function") return []
-    return Model.catalogRecords(lib.sortedEntries(root.searchQuery), root.appNames)
+    return Model.catalogRecords(lib.sortedEntries(root.searchQuery), root.appNames, setting("pinnedApps", null), root.appAliases)
   }
   readonly property bool browsingApps: root.view === "apps"
   readonly property bool confirmingSession: root.sessionConfirm !== ""
@@ -336,6 +336,27 @@ Panel {
     root.close()
   }
 
+  function persistSettings(values) {
+    var entry = { id: root.moduleName }
+    for (var existing in root.settings) if (existing !== "id") entry[existing] = root.settings[existing]
+    for (var key in values) entry[key] = values[key]
+    root.settings = entry
+    if (root.hostWidget && "settings" in root.hostWidget) root.hostWidget.settings = entry
+    if (root.bar && root.bar.shell && typeof root.bar.shell.updateEntryInline === "function")
+      root.bar.shell.updateEntryInline(root.moduleName, entry)
+  }
+
+  function togglePinnedApp(app) {
+    if (!app || !app.id) return
+    var next = Model.togglePinnedSetting(setting("pinnedApps", null), app.id, root.appAliases)
+    root.persistSettings({ pinnedApps: next.setting })
+  }
+
+  function togglePinnedAtCursor() {
+    if (!root.browsingApps) return
+    root.togglePinnedApp(root.catalog[root.appCursor])
+  }
+
   function launchCatalogApp(index) {
     var app = root.catalog[index]
     if (!app) return
@@ -401,6 +422,10 @@ Panel {
         }
         if (key === "a") {
           root.enterApps(false)
+          return
+        }
+        if (key === "p" && root.browsingApps) {
+          root.togglePinnedAtCursor()
           return
         }
         if (t >= "1" && t <= "9") root.handleDigit(t)
@@ -778,7 +803,7 @@ Panel {
                   Text {
                     anchors.verticalCenter: parent.verticalCenter
                     anchors.left: parent.left
-                    anchors.right: parent.right
+                    anchors.right: pinLabel.left
                     anchors.leftMargin: Style.space(8)
                     anchors.rightMargin: Style.space(8)
                     text: appRow.modelData.name
@@ -788,6 +813,18 @@ Panel {
                     elide: Text.ElideRight
                   }
 
+                  Text {
+                    id: pinLabel
+                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.right: parent.right
+                    anchors.rightMargin: Style.space(8)
+                    visible: appRow.modelData.pinned || appRow.selected || appMouse.containsMouse || pinMouse.containsMouse
+                    text: appRow.modelData.pinned ? "unpin" : "pin"
+                    color: pinMouse.containsMouse ? root.contentForeground : root.dimForeground
+                    font.family: root.contentFontFamily
+                    font.pixelSize: Style.font.bodySmall
+                  }
+
                   MouseArea {
                     id: appMouse
                     anchors.fill: parent
@@ -795,6 +832,18 @@ Panel {
                     cursorShape: Qt.PointingHandCursor
                     onEntered: root.appCursor = appRow.index
                     onClicked: root.launchCatalogApp(appRow.index)
+                  }
+
+                  MouseArea {
+                    id: pinMouse
+                    anchors.top: parent.top
+                    anchors.bottom: parent.bottom
+                    anchors.right: parent.right
+                    width: pinLabel.implicitWidth + Style.space(16)
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onEntered: root.appCursor = appRow.index
+                    onClicked: root.togglePinnedApp(appRow.modelData)
                   }
                 }
 
@@ -829,10 +878,19 @@ Panel {
               anchors.fill: parent
               spacing: Style.space(10)
 
+              Row {
+                id: leftFooter
+                Layout.fillWidth: false
+                Layout.alignment: Qt.AlignLeft | Qt.AlignVCenter
+                Layout.preferredWidth: Style.space(200) + (root.browsingApps ? Style.space(56) : 0)
+                Layout.maximumWidth: Style.space(200) + (root.browsingApps ? Style.space(56) : 0)
+                spacing: Style.space(10)
+                height: parent.height
+
               Item {
                 id: searchHit
-                Layout.fillWidth: true
-                Layout.fillHeight: true
+                width: Style.space(200)
+                height: parent.height
 
                 Row {
                   anchors.verticalCenter: parent.verticalCenter
@@ -895,6 +953,9 @@ Panel {
                       } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
                         root.launchCatalogApp(root.appCursor)
                         event.accepted = true
+                      } else if (event.key === Qt.Key_P && (event.modifiers & Qt.ControlModifier)) {
+                        root.togglePinnedAtCursor()
+                        event.accepted = true
                       } else if (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) {
                         root.switchPanel((event.modifiers & Qt.ShiftModifier) || event.key === Qt.Key_Backtab ? -1 : 1)
                         event.accepted = true
@@ -936,6 +997,52 @@ Panel {
                 }
               }
 
+              Item {
+                id: footerPin
+                visible: root.browsingApps
+                width: footerPinRow.implicitWidth
+                height: parent.height
+
+                Row {
+                  id: footerPinRow
+                  spacing: Style.space(6)
+                  anchors.verticalCenter: parent.verticalCenter
+
+                  Text {
+                    visible: !searchInput.activeFocus
+                    text: "p"
+                    color: root.keyHintForeground
+                    font.family: root.contentFontFamily
+                    font.pixelSize: Style.font.subtitle
+                  }
+
+                  Text {
+                    text: {
+                      var app = root.catalog[root.appCursor]
+                      return app && app.pinned ? "unpin" : "pin"
+                    }
+                    color: footerPinMouse.containsMouse ? root.contentForeground : root.dimForeground
+                    font.family: root.contentFontFamily
+                    font.pixelSize: Style.font.bodySmall
+                  }
+                }
+
+                MouseArea {
+                  id: footerPinMouse
+                  anchors.fill: parent
+                  hoverEnabled: true
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: root.togglePinnedAtCursor()
+                }
+              }
+              }
+
+              Item {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                Layout.minimumWidth: Style.space(16)
+              }
+
               Text {
                 visible: !root.browsingApps
                 text: root.installedAppCount + " apps"
@@ -943,12 +1050,16 @@ Panel {
                 font.family: root.contentFontFamily
                 font.pixelSize: Style.font.bodySmall
                 Layout.alignment: Qt.AlignVCenter
+                Layout.preferredWidth: visible ? implicitWidth : 0
+                Layout.maximumWidth: visible ? 65535 : 0
               }
 
               Row {
                 visible: !root.browsingApps
                 spacing: Style.space(6)
                 Layout.alignment: Qt.AlignVCenter
+                Layout.preferredWidth: visible ? implicitWidth : 0
+                Layout.maximumWidth: visible ? 65535 : 0
 
                 Text {
                   text: "a"
