@@ -228,3 +228,116 @@ test("app list cursor clamps and session commands map", () => {
   assert.equal(Model.sessionNeedsConfirm("reboot"), true)
   assert.equal(Model.sessionNeedsConfirm("logout"), false)
 })
+
+test("findRunningToplevels returns every window of an app, workspace-ordered", () => {
+  const a = toplevel("ghostty", "one", { address: "0xA" })
+  const b = toplevel("ghostty", "two", { address: "0xB" })
+  const c = toplevel("ghostty", "three", { address: "0xC" })
+  const other = toplevel("firefox", "web", { address: "0xF" })
+  const spaces = { values: [workspace(5, [c, other]), workspace(2, [a, b])] }
+  a.workspace = { id: 2 }
+  b.workspace = { id: 2 }
+  c.workspace = { id: 5 }
+
+  const found = Model.findRunningToplevels("ghostty", null, spaces, {})
+  assert.equal(found.length, 3)
+  // Joined into a string on purpose: an array built inside the vm realm
+  // carries that realm's prototype, which strict deep-equality rejects.
+  assert.equal(found.map((t) => t.address).join(","), "0xA,0xB,0xC")
+
+  assert.equal(Model.findRunningToplevels("inkscape", null, spaces, {}).length, 0)
+})
+
+test("nextToplevel cycles from the focused window and wraps", () => {
+  const mk = (addr, activated) => ({ address: addr, activated: !!activated })
+  const tops = [mk("0xA"), mk("0xB"), mk("0xC")]
+
+  // Nothing focused and nothing remembered: start at the first.
+  assert.equal(Model.nextToplevel(tops, "").address, "0xA")
+  // Remembered but unfocused: advance from there.
+  assert.equal(Model.nextToplevel(tops, "0xA").address, "0xB")
+  assert.equal(Model.nextToplevel(tops, "0xC").address, "0xA", "wraps")
+  // A focused window wins over the remembered one.
+  const focused = [mk("0xA"), mk("0xB", true), mk("0xC")]
+  assert.equal(Model.nextToplevel(focused, "0xA").address, "0xC")
+
+  // A single window always resolves to itself, focused or not.
+  assert.equal(Model.nextToplevel([mk("0xA")], "0xA").address, "0xA")
+  assert.equal(Model.nextToplevel([mk("0xA", true)], "").address, "0xA")
+  assert.equal(Model.nextToplevel([], "0xA"), null)
+  assert.equal(Model.nextToplevel(null, ""), null)
+})
+
+test("launchWorkspaceId stays put unless the empty-workspace mode is set", () => {
+  const spaces = { values: [workspace(1, [toplevel("foo", "x")]), workspace(2, [])] }
+
+  assert.equal(Model.parseLaunchWorkspace(""), "current")
+  assert.equal(Model.parseLaunchWorkspace(null), "current")
+  assert.equal(Model.parseLaunchWorkspace("Current workspace"), "current")
+  assert.equal(Model.parseLaunchWorkspace("empty"), "empty")
+  assert.equal(Model.parseLaunchWorkspace("First empty workspace"), "empty")
+
+  // 0 means "launch right here".
+  assert.equal(Model.launchWorkspaceId("current", 9, spaces), 0)
+  assert.equal(Model.launchWorkspaceId("", 9, spaces), 0)
+  assert.equal(Model.launchWorkspaceId("First empty workspace", 9, spaces), 2)
+})
+
+test("catalogRecords annotates running state from a prebuilt window index", () => {
+  const term = toplevel("Alacritty", "shell", { address: "0xA", activated: true })
+  const term2 = toplevel("Alacritty", "logs", { address: "0xB" })
+  const chrome = toplevel("chromium", "web", { address: "0xC" })
+  term.workspace = { id: 2 }
+  term2.workspace = { id: 2 }
+  chrome.workspace = { id: 5 }
+  const spaces = { values: [workspace(2, [term, term2]), workspace(5, [chrome])] }
+
+  const index = Model.toplevelIndex(spaces)
+  assert.equal(index.length, 3)
+
+  const rows = [
+    { entry: { id: "Alacritty", name: "Alacritty" } },
+    { entry: { id: "chromium", name: "Chromium" } },
+    { entry: { id: "inkscape", name: "Inkscape" } }
+  ]
+  const records = Model.catalogRecords(rows, "", undefined, {}, index)
+
+  assert.equal(records[0].running, true)
+  assert.equal(records[0].workspaceId, 2)
+  assert.equal(records[0].windows, 2, "both terminals counted")
+  assert.equal(records[1].running, true)
+  assert.equal(records[1].workspaceId, 5)
+  assert.equal(records[2].running, false)
+  assert.equal(records[2].workspaceId, 0)
+
+  // Without an index the extra fields stay inert, so installedAppCount and any
+  // other caller that omits it pays nothing.
+  const plain = Model.catalogRecords(rows, "")
+  assert.equal(plain[0].running, false)
+  assert.equal(plain[0].windows, 0)
+})
+
+test("runningStateFor prefers the focused window for the workspace it reports", () => {
+  const index = [
+    { cls: "Alacritty", workspaceId: 2, address: "0xA", activated: false },
+    { cls: "Alacritty", workspaceId: 7, address: "0xB", activated: true }
+  ]
+  const state = Model.runningStateFor("Alacritty", null, index, {})
+  assert.equal(state.running, true)
+  assert.equal(state.windows, 2)
+  assert.equal(state.workspaceId, 7, "reports where Enter would actually land")
+
+  assert.equal(Model.runningStateFor("Alacritty", null, [], {}).running, false)
+  assert.equal(Model.runningStateFor("gimp", null, index, {}).running, false)
+})
+
+test("catalogHint describes the action and names the live new-instance key", () => {
+  const running = { running: true, workspaceId: 3 }
+  const idle = { running: false, workspaceId: 0 }
+
+  assert.equal(Model.catalogHint(running, false), "↵ go to 3 · n new")
+  assert.equal(Model.catalogHint(idle, false), "↵ open · n new")
+  // The search field types a plain n, so it advertises Ctrl+N instead.
+  assert.equal(Model.catalogHint(running, true), "↵ go to 3 · ^n new")
+  assert.equal(Model.catalogHint(null, false), "")
+})

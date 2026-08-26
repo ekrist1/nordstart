@@ -11,6 +11,9 @@ The modal has two halves:
   app is already open. Click a running app to jump to its workspace, or a
   closed one to launch it on the first empty workspace.
 
+Behind those sit two full-width views: the **all-apps** list (`a`) and the
+**app store** (`s`), where you can install, update and uninstall software.
+
 Click a workspace, press `1`–`9`, or move with the arrow keys / `hjkl` and
 press Enter. Tab and Shift+Tab move to the next or previous bar panel.
 
@@ -30,10 +33,14 @@ From this folder, without git:
 omarchy plugin validate .
 mkdir -p ~/.config/omarchy/plugins
 rsync -a --delete --exclude .git ./ ~/.config/omarchy/plugins/io.github.ekrist1.nordstart/
-omarchy-shell shell rescanPlugins
+omarchy-restart-shell
 omarchy plugin enable io.github.ekrist1.nordstart --yes
 omarchy bar move io.github.ekrist1.nordstart --after omarchy.workspaces
 ```
+
+Re-syncing after an edit needs `omarchy-restart-shell`, not
+`omarchy-shell shell rescanPlugins`: the latter reloads the plugin entry but the QML engine keeps
+its already-compiled `Panel.qml`, so the running shell quietly carries on with the old code.
 
 ## Keyboard shortcut
 
@@ -62,14 +69,35 @@ omarchy-shell shell toggle io.github.ekrist1.nordstart
   numbers) to open the launcher.
 - Click a workspace, or press its number, to switch to it. With workspace
   preview on, the right side shows a live view of that workspace's window.
-- Click a pinned app to focus it if it is running, or to open it on an empty
-  workspace if it is not.
+- Click a pinned app to go to it if it is running, or to start it if it is
+  not. When an app has several windows open, activating it again walks
+  through them in turn rather than always landing on the same one.
+- Press `n` (or Shift-click) to start **another** copy of the selected app,
+  on the workspace you are already on — that is how you get two terminals
+  side by side, or a second window of an app that is already running. While
+  the search box has focus a plain `n` types a letter, so use `Ctrl+N` there
+  (the same way `Ctrl+P` pins while typing). Shift+Enter also works there.
+- Running apps in the all-apps list carry a dot and the workspace they are on,
+  and the selected row spells out what its keys will do — `↵ go to 2 · n new`
+  for something already running, `↵ open · n new` for something that is not.
 - Press `q` or `/` to jump to search, or `a` to open the all-apps list.
   Click **search apps...** or **all apps** for the same. Type to filter,
   Enter to launch, Esc to return to workspaces (Esc again closes the
   launcher). Press `p` (or click **pin** / **unpin**) to pin the selected
   app to the launcher, or to take it off. That writes `pinnedApps` in
   `shell.json`.
+- Press `s` (or click **store**) for the app store. It lists Omarchy's curated
+  app catalog grouped by category — browsers, editors, terminals, AI, gaming,
+  services, dev environments — with each row marked `install` or `installed`.
+  Type to filter; a query that curated apps do not cover also searches the
+  Arch repos. `Enter` installs the selected app, `x` uninstalls it (with a
+  confirmation). When updates are pending, an **Update system** row appears at
+  the top and the footer shows `store •`.
+
+  Installs and removals open in a floating terminal, which is where the sudo
+  password prompt and the progress output appear. Nordstart itself never asks
+  for a password and never runs a package command directly. The panel closes
+  when the terminal takes over; reopen it to see the updated state.
 - The footer icons log out immediately, and ask for confirmation before
   reboot or power off (`Enter` confirms, `Esc` cancels).
 - Escape or a click outside the modal closes it. Tab and Shift+Tab move to
@@ -87,11 +115,24 @@ Tune the widget from the bar settings panel, or inline in
   "hoverOpen": true,
   "showWorkspacePreview": true,
   "workspaceCount": 9,
+  "launchWorkspace": "Current workspace",
   "pinnedApps": "firefox,code,thunderbird,tableplus,onlyoffice-desktopeditors",
   "appNames": "",
-  "appAliases": ""
+  "appAliases": "",
+  "appStoreEnabled": true,
+  "appStoreSearchAur": false
 }
 ```
+
+`launchWorkspace` decides where an app opens when you start it: `Current
+workspace` (the default) leaves you where you are, `First empty workspace`
+jumps to the first unoccupied one. The `n` / Shift-click "another copy" action
+ignores this and always opens on the current workspace, since asking for a
+second window is asking for it beside the first.
+
+`appStoreEnabled` turns the store view (and its `s` key) on or off.
+`appStoreSearchAur` adds AUR results to store searches through `yay`; it is off
+by default because AUR searches need the network and AUR packages are unvetted.
 
 `pinnedApps` is a comma-separated list of desktop entry ids. Installed apps
 are resolved with a few aliases (`code` also matches VS Code / Codium, `files`
@@ -101,6 +142,33 @@ back to the default pins; `none` means no pins.
 
 Nautilus windows show as **Files**. Other common desktop classes (Chrome,
 Telegram, Spotify, Settings, and so on) have built-in friendly names too.
+
+### Adding your own apps to the store
+
+The store reads Omarchy's menu catalog, so anything you add to
+`~/.config/omarchy/extensions/omarchy-menu.jsonc` shows up in it. Rows are
+matched by id: an `install.<category>.<name>` entry becomes a store row, and a
+matching `remove.<category>.<name>` entry gives that row an uninstall action.
+
+```jsonc
+{
+  "install.editor.micro": {
+    "icon": "",
+    "label": "Micro",
+    "when": "! omarchy-pkg-present micro",
+    "action": "omarchy-install-app Micro micro"
+  },
+  "remove.editor.micro": {
+    "icon": "",
+    "label": "Micro",
+    "when": "omarchy-pkg-present micro",
+    "action": "omarchy-launch-floating-terminal-with-presentation 'omarchy-pkg-drop micro'"
+  }
+}
+```
+
+The `when` condition is what tells the store whether the app is installed. Both
+files are watched, so a saved edit shows up without restarting the shell.
 
 ### Custom names and aliases
 
@@ -127,11 +195,12 @@ for matching a running window to a pinned row (`id=alias|alias`).
 ## Tests
 
 The naming, alias, workspace, and pinned-app logic lives in
-`NordstartModel.js` as plain functions, so it can be checked without the
-desktop session:
+`NordstartModel.js`, and the store's catalog, guard, search-parsing and command
+logic lives in `StoreModel.js` — both as plain functions, so they can be checked
+without the desktop session:
 
 ```bash
-node --test tests/nordstart-model.test.js
+node --test tests/nordstart-model.test.js tests/store-model.test.js
 ```
 
 That is the right kind of test for this plugin: it locks down labels, user

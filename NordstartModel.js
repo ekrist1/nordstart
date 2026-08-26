@@ -615,6 +615,58 @@ function matchToplevel(toplevel, appId, entry, userAliases) {
   return entryMatchesClass(entry, cls)
 }
 
+// Every window belonging to an app, ordered by workspace so a cycle visits
+// them in the same sequence every time. collectToplevels already walks
+// workspaces in order and sort is stable, so windows sharing a workspace keep
+// their relative order.
+function findRunningToplevels(appId, entry, workspaces, userAliases) {
+  var tops = collectToplevels(workspaces)
+  var out = []
+  for (var i = 0; i < tops.length; i++) {
+    if (matchToplevel(tops[i], appId, entry, userAliases)) out.push(tops[i])
+  }
+  out.sort(function(a, b) {
+    var aw = a.workspace && a.workspace.id ? Number(a.workspace.id) : 0
+    var bw = b.workspace && b.workspace.id ? Number(b.workspace.id) : 0
+    return aw - bw
+  })
+  return out
+}
+
+// Advance from whichever window is focused right now; failing that, from the
+// one we last sent the user to. With nothing to go on, start at the first.
+// A single window always resolves to itself, so cycling is a no-op there.
+function nextToplevel(tops, lastAddress) {
+  if (!tops || !tops.length) return null
+
+  var from = -1
+  for (var i = 0; i < tops.length; i++) {
+    if (tops[i] && tops[i].activated) { from = i; break }
+  }
+  if (from < 0 && lastAddress) {
+    for (var j = 0; j < tops.length; j++) {
+      if (tops[j] && String(tops[j].address || "") === String(lastAddress)) { from = j; break }
+    }
+  }
+  if (from < 0) return tops[0]
+  return tops[(from + 1) % tops.length]
+}
+
+// `launchWorkspace` accepts the manifest enum's labels as well as the short
+// tokens, since the settings panel writes whatever string it displays.
+function parseLaunchWorkspace(raw) {
+  var value = String(raw == null ? "" : raw).trim().toLowerCase()
+  if (value.indexOf("empty") >= 0) return "empty"
+  return "current"
+}
+
+// The workspace a launch should switch to first. 0 means "stay put", which is
+// what lets a second terminal land beside the first instead of jumping away.
+function launchWorkspaceId(mode, count, workspaces) {
+  if (parseLaunchWorkspace(mode) !== "empty") return 0
+  return firstEmptyWorkspace(count, workspaces)
+}
+
 function findRunningToplevel(appId, entry, workspaces, userAliases) {
   var tops = collectToplevels(workspaces)
   var match = null
@@ -671,7 +723,64 @@ function cursorIndex(section, workspaceId, pinnedIndex, workspaceCount, pinnedCo
   return { section: "workspaces", workspaceId: id, pinnedIndex: pinnedIndex }
 }
 
-function catalogRecords(rows, userNames, rawPinned, userAliases) {
+// Each open window's class, derived once, so annotating a ~100-row catalog
+// does not re-derive it per row. Built once per catalog rebuild.
+function toplevelIndex(workspaces) {
+  var tops = collectToplevels(workspaces)
+  var out = []
+  for (var i = 0; i < tops.length; i++) {
+    var cls = toplevelClass(tops[i])
+    if (!cls) continue
+    out.push({
+      cls: cls,
+      workspaceId: tops[i].workspace && tops[i].workspace.id ? Number(tops[i].workspace.id) : 0,
+      address: tops[i].address ? String(tops[i].address) : "",
+      activated: tops[i].activated === true
+    })
+  }
+  return out
+}
+
+// Running state for one catalog row against that prebuilt index. Alias
+// candidates are expanded once per row rather than once per window, which is
+// what keeps this off the per-keystroke hot path.
+function runningStateFor(appId, entry, index, userAliases) {
+  var idle = { running: false, workspaceId: 0, windows: 0 }
+  if (!index || !index.length) return idle
+
+  var candidates = aliasCandidates(appId, userAliases)
+  var best = null
+  var count = 0
+
+  for (var i = 0; i < index.length; i++) {
+    var hit = false
+    for (var c = 0; c < candidates.length; c++) {
+      if (classesMatch(candidates[c], index[i].cls)) { hit = true; break }
+    }
+    if (!hit && entry && entryMatchesClass(entry, index[i].cls)) hit = true
+    if (!hit) continue
+
+    count++
+    // Prefer the focused window, so the workspace shown is the one Enter
+    // would actually take you to first.
+    if (!best || (index[i].activated && !best.activated)) best = index[i]
+  }
+
+  if (!best) return idle
+  return { running: true, workspaceId: best.workspaceId, windows: count }
+}
+
+// What activating the selected row will do. `searchFocused` matters because
+// the search field types a plain `n`, so it uses Ctrl+N instead.
+function catalogHint(record, searchFocused) {
+  if (!record) return ""
+  var go = record.running && record.workspaceId > 0
+    ? "\u21b5 go to " + record.workspaceId
+    : "\u21b5 open"
+  return go + " \u00b7 " + (searchFocused ? "^n" : "n") + " new"
+}
+
+function catalogRecords(rows, userNames, rawPinned, userAliases, index) {
   var names = parseNameMap(userNames)
   var pinnedIds = rawPinned !== undefined ? parsePinnedSetting(rawPinned) : null
   var out = []
@@ -688,11 +797,15 @@ function catalogRecords(rows, userNames, rawPinned, userAliases) {
     seen[key] = true
     var name = shortAppName(entry.name || "", id, names)
     if (!name) name = String(entry.name || id)
+    var state = index ? runningStateFor(id, entry, index, userAliases) : null
     out.push({
       id: id,
       name: name,
       icon: entry.icon ? String(entry.icon) : id,
-      pinned: pinnedIds ? idIsPinned(id, pinnedIds, userAliases) : false
+      pinned: pinnedIds ? idIsPinned(id, pinnedIds, userAliases) : false,
+      running: state ? state.running : false,
+      workspaceId: state ? state.workspaceId : 0,
+      windows: state ? state.windows : 0
     })
   }
   return out

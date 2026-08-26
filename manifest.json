@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "id": "io.github.ekrist1.nordstart",
   "name": "Nordstart",
-  "version": "1.5.0",
+  "version": "1.7.0",
   "author": "espen",
   "license": "MIT",
-  "description": "Workspace launcher with pinned apps, an installed-app search, and session actions",
+  "description": "Workspace launcher with pinned apps, an installed-app search, an app store, and session actions",
   "homepage": "",
   "kinds": [
     "bar-widget"
@@ -15,7 +15,7 @@
   },
   "barWidget": {
     "displayName": "Nordstart",
-    "description": "Workspace and pinned-app launcher",
+    "description": "Workspace, pinned-app and app-store launcher",
     "category": "Compositor",
     "allowMultiple": false,
     "defaultSection": "left",
@@ -25,7 +25,10 @@
       "showWorkspacePreview": true,
       "pinnedApps": "firefox,code,thunderbird,tableplus,onlyoffice-desktopeditors",
       "appNames": "",
-      "appAliases": ""
+      "appAliases": "",
+      "appStoreEnabled": true,
+      "appStoreSearchAur": false,
+      "launchWorkspace": "Current workspace"
     },
     "schema": [
       {
@@ -53,6 +56,17 @@
         "description": "How many workspaces appear in the grid, empty or not. Hyprland workspaces above this are ignored."
       },
       {
+        "key": "launchWorkspace",
+        "type": "enum",
+        "label": "Launch apps on",
+        "options": [
+          "Current workspace",
+          "First empty workspace"
+        ],
+        "defaultValue": "Current workspace",
+        "description": "Where an app opens when you start it from the launcher. 'Current workspace' keeps you where you are, so a second terminal lands beside the first. Press n (or Shift-click) to start another copy of an app that is already running \u2014 that always opens on the current workspace."
+      },
+      {
         "key": "pinnedApps",
         "type": "string",
         "label": "Pinned apps",
@@ -72,6 +86,20 @@
         "label": "App aliases",
         "defaultValue": "",
         "description": "Extra desktop-id aliases for pinning and running-state matching. Use id=alias|alias pairs (files=nautilus|org.gnome.Nautilus) or a JSON object."
+      },
+      {
+        "key": "appStoreEnabled",
+        "type": "boolean",
+        "label": "App store",
+        "defaultValue": true,
+        "description": "Show the app store view (key: s). Browses Omarchy's curated install catalog and searches Arch packages. Installs and removals run in a floating terminal."
+      },
+      {
+        "key": "appStoreSearchAur",
+        "type": "boolean",
+        "label": "Search the AUR",
+        "defaultValue": false,
+        "description": "Include AUR results in app store searches, via yay. Off by default: AUR searches need the network and AUR packages are unvetted."
       }
     ]
   }
