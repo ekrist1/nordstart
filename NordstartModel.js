@@ -615,6 +615,141 @@ function matchToplevel(toplevel, appId, entry, userAliases) {
   return entryMatchesClass(entry, cls)
 }
 
+// ---------------------------------------------------------------- frecency
+//
+// The launcher is alphabetical, so the app you open twenty times a day costs
+// the same keystrokes as the one you have never opened. Usage is kept in
+// shell.json's `appUsage` as `id:count:lastSeconds` triples.
+
+var USAGE_HALF_LIFE_DAYS = 14
+var USAGE_LIMIT = 60
+// The host's fuzzy bands sit ~400-500 apart (prefix 10000, substring 8000,
+// keyword 6000 ...). Capping the boost below that keeps a textual match
+// authoritative and lets frecency reorder only within a band.
+var USAGE_MAX_BOOST = 400
+
+function parseUsage(raw) {
+  if (raw === null || raw === undefined) return {}
+
+  if (typeof raw === "object" && !Array.isArray(raw)) {
+    var fromObject = {}
+    for (var key in raw) {
+      var value = raw[key]
+      if (!value) continue
+      fromObject[idKey(key)] = {
+        count: Math.max(0, Number(value.count) || 0),
+        last: Math.max(0, Number(value.last) || 0)
+      }
+    }
+    return fromObject
+  }
+
+  var text = String(raw).trim()
+  if (!text) return {}
+  if (text.charAt(0) === "{") {
+    try {
+      return parseUsage(JSON.parse(text))
+    } catch (e) {
+      return {}
+    }
+  }
+
+  var out = {}
+  var parts = text.split(/[,;\n]/)
+  for (var i = 0; i < parts.length; i++) {
+    var fields = parts[i].split(":")
+    if (fields.length < 2) continue
+    var id = idKey(stripDesktop(fields[0]))
+    if (!id) continue
+    var count = Number(fields[1])
+    if (!(count > 0)) continue
+    out[id] = { count: count, last: Math.max(0, Number(fields[2]) || 0) }
+  }
+  return out
+}
+
+// Capped so shell.json cannot grow without bound; the entries dropped are the
+// ones frecency would rank last anyway.
+function formatUsage(usage, nowSeconds) {
+  var ids = []
+  for (var id in (usage || {})) ids.push(id)
+
+  ids.sort(function(a, b) {
+    return frecencyScore(usage[b], nowSeconds) - frecencyScore(usage[a], nowSeconds)
+  })
+
+  var parts = []
+  for (var i = 0; i < ids.length && i < USAGE_LIMIT; i++) {
+    var entry = usage[ids[i]]
+    if (!entry || !(entry.count > 0)) continue
+    parts.push(ids[i] + ":" + entry.count + ":" + Math.round(entry.last || 0))
+  }
+  return parts.join(",")
+}
+
+// Returns a new object; the caller persists it. Never mutates in place, since
+// QML only re-evaluates bindings when the whole object changes.
+function recordLaunch(usage, appId, nowSeconds) {
+  var id = idKey(stripDesktop(appId))
+  var out = {}
+  for (var key in (usage || {})) out[key] = usage[key]
+  if (!id) return out
+
+  var prev = out[id]
+  out[id] = {
+    count: (prev && prev.count > 0 ? prev.count : 0) + 1,
+    last: Math.max(0, Number(nowSeconds) || 0)
+  }
+  return out
+}
+
+// Count decayed by age: ten launches last year should not outrank three from
+// this morning. Half-life of two weeks.
+function frecencyScore(entry, nowSeconds) {
+  if (!entry || !(entry.count > 0)) return 0
+  var ageDays = (Number(nowSeconds) - Number(entry.last || 0)) / 86400
+  if (!(ageDays > 0)) return entry.count
+  return entry.count * Math.pow(0.5, ageDays / USAGE_HALF_LIFE_DAYS)
+}
+
+function usageScoreFor(usage, appId, nowSeconds) {
+  return frecencyScore((usage || {})[idKey(stripDesktop(appId))], nowSeconds)
+}
+
+// With no query, most-used first. With a query, the host's fuzzy score leads
+// and frecency only breaks ties. Sorting is made stable by falling back to the
+// incoming order, which is already alphabetical or score-ordered.
+function rankAppRows(rows, usage, nowSeconds, query) {
+  var list = []
+  for (var i = 0; i < (rows ? rows.length : 0); i++) {
+    var row = rows[i]
+    if (!row) continue
+    var entry = row.entry ? row.entry : row
+    list.push({
+      row: row,
+      order: i,
+      score: Number(row.score) || 0,
+      usage: usageScoreFor(usage, entry ? entry.id : "", nowSeconds)
+    })
+  }
+
+  var searching = !!String(query || "").trim()
+  list.sort(function(a, b) {
+    if (searching) {
+      var av = a.score + Math.min(USAGE_MAX_BOOST, Math.round(a.usage * 40))
+      var bv = b.score + Math.min(USAGE_MAX_BOOST, Math.round(b.usage * 40))
+      if (av !== bv) return bv - av
+    } else if (a.usage !== b.usage) {
+      return b.usage - a.usage
+    }
+    return a.order - b.order
+  })
+
+  var out = []
+  for (var j = 0; j < list.length; j++) out.push(list[j].row)
+  return out
+}
+
 // Every window belonging to an app, ordered by workspace so a cycle visits
 // them in the same sequence every time. collectToplevels already walks
 // workspaces in order and sort is stable, so windows sharing a workspace keep

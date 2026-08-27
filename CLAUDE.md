@@ -15,7 +15,7 @@ There is no build step — QML/JS files are read directly by the shell at runtim
 
 ## Commands
 
-- Run the unit tests: `node --test tests/nordstart-model.test.js tests/store-model.test.js`
+- Run the tests: `node --test tests/*.test.js` (model logic plus `tests/source-lint.test.js`)
 - Validate the plugin manifest/structure: `omarchy plugin validate .`
 - Install/sync into a local Omarchy config for manual testing (see README's "Install" section for
   the full rsync-based flow and `omarchy plugin enable`).
@@ -35,6 +35,25 @@ Note for both test files: values built inside the `vm` context carry that realm'
 `deepEq` helper that round-trips through JSON — use it there instead of `assert.deepEqual`.
 `tests/nordstart-model.test.js` has no such helper, so assert on primitives (join an array into a
 string) rather than deep-comparing what a model function returned.
+
+`tests/source-lint.test.js` is a static pass over the sources, not a unit test. It exists because
+the QML has no automated coverage and cannot get any cheaply (it needs Quickshell, Hyprland and
+layer-shell). Each rule encodes a mistake that was actually shipped, or an invariant this file
+states in prose:
+
+1. **Invalid string escapes** — `"\U000F03D7"` is not a JS escape; it evaluates to the literal text
+   `U000F03D7`. That shipped as a garbled glyph in the store. Nothing else warns: not the QML
+   engine, not qmllint.
+2. **`SplitParser` needs a `bounded:` comment** within 6 lines. Per-line handling of unbounded
+   output is what made store search lag (16,534 lines per keystroke). SplitParser is still right for
+   small output — the rule asks you to say why, not to stop using it.
+3. **`setting()` keys must exist in `barWidget.defaults` *and* `barWidget.schema`,** with matching
+   default values. This is the duplication warned about below, now enforced.
+4. **The running shell must be newer than the installed plugin** — catches testing against a stale
+   compilation after a `rescanPlugins`. Skips when the plugin isn't installed or no shell is running,
+   so a fresh checkout stays green.
+
+When adding a rule, add a fault-injection check alongside it: a lint that cannot fail is worthless.
 
 ## Architecture
 
@@ -94,6 +113,13 @@ and lives outside this repo — treat those as an external API surface, not some
   uses `n` instead; the search field sees raw events and uses `Ctrl+N` (matching the pre-existing
   `Ctrl+P` for pinning). `Model.catalogHint(record, searchFocused)` is what keeps the on-row hint
   honest about which one is live — pass `searchInput.activeFocus`.
+
+  All-apps ordering runs through `Model.rankAppRows(rows, usage, now, query)` before
+  `catalogRecords`, so the host's fuzzy score is still the input. The invariant it must keep: with a
+  query present, a better textual match always wins — usage is capped at `USAGE_MAX_BOOST` (400),
+  which is under the ~500 gap between the host's score bands, so frecency can only reorder *within*
+  a band. Widening that cap would let a much-used app outrank a far better match. `appUsage` is
+  persisted through the existing `persistSettings` round-trip and capped at 60 entries.
 
   Running state in the all-apps list goes through `Model.toplevelIndex(workspaces)` once per
   rebuild, passed as `catalogRecords`' optional 5th argument. Do not call `findRunningToplevel` per

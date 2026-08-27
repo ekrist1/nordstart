@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.ekrist1.nordstart",
   "name": "Nordstart",
-  "version": "1.8.0",
+  "version": "1.9.0",
   "author": "espen",
   "license": "MIT",
   "description": "Workspace launcher with pinned apps, an installed-app search, an app store, and session actions",
@@ -29,7 +29,9 @@
       "appStoreEnabled": true,
       "appStoreSearchAur": false,
       "launchWorkspace": "Current workspace",
-      "pluginUpdateCheck": "On"
+      "pluginUpdateCheck": "On",
+      "appOrder": "Recent first",
+      "appUsage": ""
     },
     "schema": [
       {
@@ -66,6 +68,17 @@
         ],
         "defaultValue": "Current workspace",
         "description": "Where an app opens when you start it from the launcher. 'Current workspace' keeps you where you are, so a second terminal lands beside the first. Press n (or Shift-click) to start another copy of an app that is already running \u2014 that always opens on the current workspace."
+      },
+      {
+        "key": "appOrder",
+        "type": "enum",
+        "label": "All-apps order",
+        "options": [
+          "Recent first",
+          "Alphabetical"
+        ],
+        "defaultValue": "Recent first",
+        "description": "'Recent first' floats the apps you actually launch to the top of the all-apps list, decaying by how long ago you used them. When you search, the text match still wins; usage only breaks ties. 'Alphabetical' ignores usage and stops recording it."
       },
       {
         "key": "pinnedApps",
@@ -112,6 +125,13 @@
         ],
         "defaultValue": "On",
         "description": "Show installed Omarchy plugins in the app store and check their git remotes for updates every 6 hours. Off disables the check and all its network traffic. Press r in the store to check now."
+      },
+      {
+        "key": "appUsage",
+        "type": "string",
+        "label": "App usage data",
+        "defaultValue": "",
+        "description": "Recorded automatically as id:count:timestamp triples, newest-weighted, capped at 60 apps. Clear this to reset the 'Recent first' ordering."
       }
     ]
   }

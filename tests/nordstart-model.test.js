@@ -341,3 +341,94 @@ test("catalogHint describes the action and names the live new-instance key", () 
   assert.equal(Model.catalogHint(running, true), "↵ go to 3 · ^n new")
   assert.equal(Model.catalogHint(null, false), "")
 })
+
+const DAY = 86400
+const NOW = 1756300000
+
+test("parseUsage reads the compact form, JSON, and shrugs off junk", () => {
+  const usage = Model.parseUsage("firefox:12:1756200000,code:3:1756100000")
+  assert.equal(usage.firefox.count, 12)
+  assert.equal(usage.firefox.last, 1756200000)
+  assert.equal(usage.code.count, 3)
+
+  // A .desktop suffix and casing must land on the same key the launcher uses.
+  assert.equal(Model.parseUsage("Firefox.desktop:4:100").firefox.count, 4)
+
+  const fromJson = Model.parseUsage('{"firefox":{"count":2,"last":50}}')
+  assert.equal(fromJson.firefox.count, 2)
+
+  assert.equal(Object.keys(Model.parseUsage("")).length, 0)
+  assert.equal(Object.keys(Model.parseUsage(null)).length, 0)
+  assert.equal(Object.keys(Model.parseUsage("garbage")).length, 0)
+  assert.equal(Object.keys(Model.parseUsage("firefox:0:100")).length, 0, "a zero count is not usage")
+})
+
+test("frecencyScore decays a stale count below a fresh one", () => {
+  assert.equal(Model.frecencyScore({ count: 5, last: NOW }, NOW), 5, "today, no decay")
+  // Two-week half-life.
+  assert.equal(Model.frecencyScore({ count: 8, last: NOW - 14 * DAY }, NOW), 4)
+  assert.equal(Model.frecencyScore({ count: 8, last: NOW - 28 * DAY }, NOW), 2)
+
+  const stale = Model.frecencyScore({ count: 40, last: NOW - 180 * DAY }, NOW)
+  const fresh = Model.frecencyScore({ count: 3, last: NOW }, NOW)
+  assert.ok(fresh > stale, "three launches today beat forty from six months ago")
+
+  assert.equal(Model.frecencyScore(null, NOW), 0)
+  assert.equal(Model.frecencyScore({ count: 0, last: NOW }, NOW), 0)
+})
+
+test("recordLaunch increments without mutating what it was given", () => {
+  const before = Model.parseUsage("firefox:2:100")
+  const after = Model.recordLaunch(before, "firefox", NOW)
+
+  assert.equal(after.firefox.count, 3)
+  assert.equal(after.firefox.last, NOW)
+  assert.equal(before.firefox.count, 2, "the original object is untouched")
+  assert.notEqual(before, after, "a new object, so QML re-evaluates the binding")
+
+  assert.equal(Model.recordLaunch({}, "org.gnome.Nautilus.desktop", NOW)["org.gnome.nautilus"].count, 1)
+  assert.equal(Object.keys(Model.recordLaunch({}, "", NOW)).length, 0)
+})
+
+test("formatUsage round-trips and caps how much lands in shell.json", () => {
+  const usage = Model.parseUsage("firefox:12:" + NOW + ",code:3:" + NOW)
+  const text = Model.formatUsage(usage, NOW)
+  assert.equal(text, "firefox:12:" + NOW + ",code:3:" + NOW, "most-used first")
+  assert.equal(Model.parseUsage(text).firefox.count, 12, "round-trips")
+
+  const many = {}
+  for (let i = 0; i < 200; i++) many["app" + i] = { count: i + 1, last: NOW }
+  const capped = Model.formatUsage(many, NOW).split(",")
+  assert.equal(capped.length, 60, "capped so shell.json cannot grow without bound")
+  assert.ok(capped[0].startsWith("app199:"), "the busiest survive the cap")
+})
+
+test("rankAppRows puts most-used first, but never outranks a better text match", () => {
+  const rows = [
+    { entry: { id: "alacritty" }, score: 0 },
+    { entry: { id: "brave" }, score: 0 },
+    { entry: { id: "code" }, score: 0 }
+  ]
+  const usage = Model.parseUsage("code:20:" + NOW + ",brave:5:" + NOW)
+
+  const idle = Model.rankAppRows(rows, usage, NOW, "")
+  assert.equal(idle.map((r) => r.entry.id).join(","), "code,brave,alacritty")
+
+  // With no usage at all the incoming (alphabetical) order is preserved.
+  assert.equal(Model.rankAppRows(rows, {}, NOW, "").map((r) => r.entry.id).join(","), "alacritty,brave,code")
+
+  // A prefix hit (10000) must stay ahead of a keyword hit (6000) no matter how
+  // heavily the weaker match is used.
+  const scored = [
+    { entry: { id: "abc-viewer" }, score: 6000 },
+    { entry: { id: "abacus" }, score: 10000 }
+  ]
+  const heavy = Model.parseUsage("abc-viewer:500:" + NOW)
+  assert.equal(Model.rankAppRows(scored, heavy, NOW, "ab")[0].entry.id, "abacus")
+
+  // Within one band, usage decides.
+  const tied = [{ entry: { id: "x1" }, score: 8000 }, { entry: { id: "x2" }, score: 8000 }]
+  assert.equal(Model.rankAppRows(tied, Model.parseUsage("x2:9:" + NOW), NOW, "x")[0].entry.id, "x2")
+
+  assert.equal(Model.rankAppRows(null, {}, NOW, "").length, 0)
+})

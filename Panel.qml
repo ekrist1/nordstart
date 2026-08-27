@@ -32,6 +32,8 @@ Panel {
   readonly property var workspaceIds: Model.workspaceIds(workspaceCount)
   readonly property var appNames: Model.parseNameMap(setting("appNames", null))
   readonly property var appAliases: Model.parseAliasMap(setting("appAliases", null))
+  readonly property var appUsage: Model.parseUsage(setting("appUsage", null))
+  readonly property bool rankByUsage: String(setting("appOrder", "Recent first")).toLowerCase().indexOf("alpha") < 0
   readonly property var pinned: {
     var _ = Hyprland.workspaces.values
     var __ = Hyprland.focusedWorkspace
@@ -97,7 +99,10 @@ Panel {
     // Only annotate running state when the list is actually on screen —
     // otherwise every window focus change would re-walk the catalog.
     var index = (root.opened && root.browsingApps) ? Model.toplevelIndex(Hyprland.workspaces) : null
-    return Model.catalogRecords(lib.sortedEntries(root.searchQuery), root.appNames, setting("pinnedApps", null), root.appAliases, index)
+    var rows = lib.sortedEntries(root.searchQuery)
+    if (root.rankByUsage)
+      rows = Model.rankAppRows(rows, root.appUsage, root.nowSeconds(), root.searchQuery)
+    return Model.catalogRecords(rows, root.appNames, setting("pinnedApps", null), root.appAliases, index)
   }
   readonly property bool browsingApps: root.view === "apps"
   readonly property bool browsingStore: root.view === "store"
@@ -295,8 +300,21 @@ Panel {
   // Enter / click: go to the app if it is running, otherwise start it.
   // Repeated activation cycles through an app's windows rather than parking
   // on whichever one findRunningToplevel happened to pick first.
+  function nowSeconds() {
+    return Math.round(Date.now() / 1000)
+  }
+
+  // Reaching for an app counts whether it was already running or not — the
+  // point is which apps you actually use, not which ones you cold-start.
+  function noteLaunch(appId) {
+    if (!root.rankByUsage || !appId) return
+    var next = Model.recordLaunch(root.appUsage, appId, root.nowSeconds())
+    root.persistSettings({ appUsage: Model.formatUsage(next, root.nowSeconds()) })
+  }
+
   function launchPinned(app) {
     if (!app || !app.id) return
+    root.noteLaunch(app.id)
 
     var windows = Model.findRunningToplevels(app.id, null, Hyprland.workspaces, root.appAliases)
     if (windows.length > 0) {
@@ -311,6 +329,7 @@ Panel {
   // window is asking for it beside the first.
   function launchNewInstance(app) {
     if (!app || !app.id) return
+    root.noteLaunch(app.id)
     root.spawnApp(app, "current")
   }
 
@@ -641,6 +660,9 @@ Panel {
   Process {
     id: guardProc
     property string collected: ""
+    // bounded: two lines per catalog entry at most (a `when:` and a `checked:`),
+    // so ~120 for the sixty apps Omarchy curates. Fixed by the menu file, not
+    // by anything the user types.
     stdout: SplitParser {
       onRead: function(data) { guardProc.collected += data + "\n" }
     }
@@ -688,6 +710,7 @@ Panel {
     id: updateProc
     property string collected: ""
     command: ["bash", "-lc", "checkupdates 2>/dev/null | wc -l"]
+    // bounded: `wc -l` emits exactly one line.
     stdout: SplitParser {
       onRead: function(data) { updateProc.collected += data }
     }

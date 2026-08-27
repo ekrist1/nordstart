@@ -77,6 +77,11 @@ omarchy-shell shell toggle io.github.ekrist1.nordstart
   side by side, or a second window of an app that is already running. While
   the search box has focus a plain `n` types a letter, so use `Ctrl+N` there
   (the same way `Ctrl+P` pins while typing). Shift+Enter also works there.
+- The all-apps list puts the apps you actually launch at the top, weighted by
+  how recently you used them (a two-week half-life, so three launches today
+  beat forty from six months ago). When you type, the text match still decides
+  — usage only breaks ties between equally good matches. Set
+  `appOrder` to `Alphabetical` to turn this off.
 - Running apps in the all-apps list carry a dot and the workspace they are on,
   and the selected row spells out what its keys will do — `↵ go to 2 · n new`
   for something already running, `↵ open · n new` for something that is not.
@@ -128,6 +133,7 @@ Tune the widget from the bar settings panel, or inline in
   "pinnedApps": "firefox,code,thunderbird,tableplus,onlyoffice-desktopeditors",
   "appNames": "",
   "appAliases": "",
+  "appOrder": "Recent first",
   "appStoreEnabled": true,
   "appStoreSearchAur": false,
   "pluginUpdateCheck": "On"
@@ -139,6 +145,11 @@ workspace` (the default) leaves you where you are, `First empty workspace`
 jumps to the first unoccupied one. The `n` / Shift-click "another copy" action
 ignores this and always opens on the current workspace, since asking for a
 second window is asking for it beside the first.
+
+`appOrder` chooses between `Recent first` (the default) and `Alphabetical` for
+the all-apps list. Usage is recorded in `appUsage` as `id:count:timestamp`
+triples, capped at 60 apps; clear that value to reset the ordering, or set
+`appOrder` to `Alphabetical` to stop recording it entirely.
 
 `pluginUpdateCheck` controls the plugin section and its update check. `Off`
 removes the section and stops all of its network traffic. The check runs one
@@ -215,8 +226,13 @@ logic lives in `StoreModel.js` — both as plain functions, so they can be check
 without the desktop session:
 
 ```bash
-node --test tests/nordstart-model.test.js tests/store-model.test.js
+node --test tests/*.test.js
 ```
+
+That also runs `tests/source-lint.test.js`, a static pass over the QML and JS
+that checks the things unit tests here cannot: invalid string escape sequences,
+per-line handling of unbounded process output, and settings declared in the QML
+but missing from `manifest.json`.
 
 That is the right kind of test for this plugin: it locks down labels, user
 overrides, terminal subtitles, and workspace cursor movement. Full UI
