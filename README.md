@@ -94,6 +94,15 @@ omarchy-shell shell toggle io.github.ekrist1.nordstart
   confirmation). When updates are pending, an **Update system** row appears at
   the top and the footer shows `store •`.
 
+- The store also lists your installed Omarchy plugins under **Plugins**, with
+  the state of each one: `update · 2 commits`, `up to date`, `local checkout`
+  (a plugin that is not a git checkout, so there is nothing to pull), or
+  `check failed`. Enter on a plugin that is behind opens a floating terminal
+  running `omarchy plugin update`, which shows you the real diff and asks
+  before applying it, then restarts the shell so the new code actually runs.
+  Press `r` to check again right away; otherwise it checks every 6 hours and
+  the footer shows `store •` when anything is behind.
+
   Installs and removals open in a floating terminal, which is where the sudo
   password prompt and the progress output appear. Nordstart itself never asks
   for a password and never runs a package command directly. The panel closes
@@ -120,7 +129,8 @@ Tune the widget from the bar settings panel, or inline in
   "appNames": "",
   "appAliases": "",
   "appStoreEnabled": true,
-  "appStoreSearchAur": false
+  "appStoreSearchAur": false,
+  "pluginUpdateCheck": "On"
 }
 ```
 
@@ -129,6 +139,11 @@ workspace` (the default) leaves you where you are, `First empty workspace`
 jumps to the first unoccupied one. The `n` / Shift-click "another copy" action
 ignores this and always opens on the current workspace, since asking for a
 second window is asking for it beside the first.
+
+`pluginUpdateCheck` controls the plugin section and its update check. `Off`
+removes the section and stops all of its network traffic. The check runs one
+`git fetch` per installed plugin, caching the result under
+`~/.cache/nordstart/` so opening the panel never waits on the network.
 
 `appStoreEnabled` turns the store view (and its `s` key) on or off.
 `appStoreSearchAur` adds AUR results to store searches through `yay`; it is off

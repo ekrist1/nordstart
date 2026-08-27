@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.ekrist1.nordstart",
   "name": "Nordstart",
-  "version": "1.7.0",
+  "version": "1.8.0",
   "author": "espen",
   "license": "MIT",
   "description": "Workspace launcher with pinned apps, an installed-app search, an app store, and session actions",
@@ -28,7 +28,8 @@
       "appAliases": "",
       "appStoreEnabled": true,
       "appStoreSearchAur": false,
-      "launchWorkspace": "Current workspace"
+      "launchWorkspace": "Current workspace",
+      "pluginUpdateCheck": "On"
     },
     "schema": [
       {
@@ -100,6 +101,17 @@
         "label": "Search the AUR",
         "defaultValue": false,
         "description": "Include AUR results in app store searches, via yay. Off by default: AUR searches need the network and AUR packages are unvetted."
+      },
+      {
+        "key": "pluginUpdateCheck",
+        "type": "enum",
+        "label": "Check plugins for updates",
+        "options": [
+          "On",
+          "Off"
+        ],
+        "defaultValue": "On",
+        "description": "Show installed Omarchy plugins in the app store and check their git remotes for updates every 6 hours. Off disables the check and all its network traffic. Press r in the store to check now."
       }
     ]
   }

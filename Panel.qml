@@ -62,6 +62,10 @@ Panel {
   property var storeDefaultItems: []
   property var storeUserItems: []
   property var storeConfirmRow: null
+  property var pluginRecords: []
+  property var pluginStatus: ({})
+  property bool pluginsChecking: false
+  property bool pluginCheckPending: false
   property bool guardsPending: false
   property bool searchPending: false
   property int searchRevision: 0
@@ -106,10 +110,15 @@ Panel {
   readonly property string launchWorkspaceMode: Model.parseLaunchWorkspace(setting("launchWorkspace", null))
   readonly property bool storeEnabled: setting("appStoreEnabled", true) === true
   readonly property bool storeSearchAur: setting("appStoreSearchAur", false) === true
+  readonly property bool pluginUpdateCheck: String(setting("pluginUpdateCheck", "On")).toLowerCase() !== "off"
+  readonly property string pluginCachePath: (Quickshell.env("XDG_CACHE_HOME") || (Quickshell.env("HOME") + "/.cache")) + "/nordstart/plugin-updates.tsv"
+  readonly property var pluginListRows: Store.pluginRows(root.pluginRecords, root.pluginStatus)
+  readonly property int pluginsBehind: Store.pluginsBehind(root.pluginStatus)
   readonly property var storeRecords: Store.storeCatalog(root.storeDefaultItems, root.storeUserItems)
   readonly property var storeModel: Store.storeRows(root.storeRecords, root.storeGuards, root.storePackages, {
     query: root.browsingStore ? root.searchQuery : "",
-    updateCount: root.updateCount
+    updateCount: root.updateCount,
+    plugins: root.pluginListRows
   })
   readonly property var storeRows: root.storeModel.rows
   readonly property var storeCurrentRow: root.storeRows[root.storeCursor] || null
@@ -539,6 +548,25 @@ Panel {
   function refreshStore() {
     root.evaluateStoreGuards()
     if (!updateProc.running) updateProc.running = true
+    if (!pluginListProc.running) pluginListProc.running = true
+  }
+
+  // The list is local and instant; the check is a git fetch per plugin, so it
+  // is only ever driven by the timer or an explicit `r`.
+  function checkPluginUpdates() {
+    if (!root.pluginUpdateCheck) return
+    if (pluginCheckProc.running) {
+      root.pluginCheckPending = true
+      return
+    }
+    root.pluginCheckPending = false
+
+    var script = Store.pluginCheckScript(root.pluginRecords, root.pluginCachePath)
+    if (!script) return
+
+    root.pluginsChecking = true
+    pluginCheckProc.command = ["bash", "-lc", script]
+    pluginCheckProc.running = true
   }
 
   function evaluateStoreGuards() {
@@ -671,6 +699,58 @@ Panel {
   }
 
   // Typing shouldn't spawn a pacman per keystroke.
+  // Local and instant: this is what renders the list.
+  Process {
+    id: pluginListProc
+    command: ["omarchy-plugin-catalog"]
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        root.pluginRecords = Store.parsePluginCatalog(text)
+        // First run of the session with nothing cached: check once so the
+        // list is not stuck on "not checked yet".
+        if (root.pluginUpdateCheck && root.pluginRecords.length > 0 && !pluginCacheFile.loadedOnce)
+          root.checkPluginUpdates()
+      }
+    }
+  }
+
+  // Networked: one batched run, git fetch per plugin, tee'd to the cache.
+  Process {
+    id: pluginCheckProc
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root.pluginStatus = Store.parsePluginStatus(text)
+    }
+    onExited: {
+      root.pluginsChecking = false
+      if (root.pluginCheckPending) Qt.callLater(function() { root.checkPluginUpdates() })
+    }
+  }
+
+  // Survives a shell restart, which happens often enough that a fresh process
+  // would otherwise show no status until the next check lands.
+  FileView {
+    id: pluginCacheFile
+    property bool loadedOnce: false
+    path: root.pluginCachePath
+    watchChanges: true
+    printErrors: false
+    onLoaded: {
+      pluginCacheFile.loadedOnce = true
+      root.pluginStatus = Store.parsePluginStatus(text())
+    }
+    onLoadFailed: pluginCacheFile.loadedOnce = false
+    onFileChanged: reload()
+  }
+
+  Timer {
+    interval: 6 * 60 * 60 * 1000
+    running: root.pluginUpdateCheck
+    repeat: true
+    onTriggered: root.checkPluginUpdates()
+  }
+
   Timer {
     id: searchDebounce
     interval: 180
@@ -748,6 +828,10 @@ Panel {
         }
         if (key === "p" && root.browsingApps) {
           root.togglePinnedAtCursor()
+          return
+        }
+        if (key === "r" && root.browsingStore) {
+          root.checkPluginUpdates()
           return
         }
         if (key === "n" && !root.browsingStore) {
@@ -1259,7 +1343,7 @@ Panel {
 
                 Row {
                   id: storeSearchingRow
-                  visible: root.storeSearching
+                  visible: root.storeSearching || root.pluginsChecking
                   width: visible ? implicitWidth : 0
                   spacing: Style.space(6)
                   anchors.verticalCenter: parent.verticalCenter
@@ -1272,7 +1356,7 @@ Panel {
                   }
 
                   Text {
-                    text: "searching..."
+                    text: root.pluginsChecking ? "checking plugins..." : "searching..."
                     color: root.dimForeground
                     font.family: root.contentFontFamily
                     font.pixelSize: Style.font.bodySmall
@@ -1396,10 +1480,18 @@ Panel {
                       text: {
                         var row = storeRow.modelData
                         if (row.kind === "update") return row.detail || "update"
+                        // Plugins carry their own status text: "update - 2
+                        // commits", "up to date", "local checkout", ...
+                        if (row.kind === "plugin") return row.detail
                         if (row.state === "installed") return storeRow.selected && Store.storeCanUninstall(row) ? "x uninstall" : "installed"
                         return "install"
                       }
-                      color: storeRow.modelData.state === "installed" ? root.dimForeground : Color.accent
+                      color: {
+                        var row = storeRow.modelData
+                        // Accent means "there is something to do here".
+                        if (row.kind === "plugin") return row.state === "behind" ? Color.accent : root.dimForeground
+                        return row.state === "installed" ? root.dimForeground : Color.accent
+                      }
                       font.family: root.contentFontFamily
                       font.pixelSize: Style.font.bodySmall
                     }
@@ -1645,7 +1737,7 @@ Panel {
                   }
 
                   Text {
-                    text: root.updateCount > 0 ? "store \u2022" : "store"
+                    text: (root.updateCount > 0 || root.pluginsBehind > 0) ? "store \u2022" : "store"
                     color: storeFooterMouse.containsMouse ? root.contentForeground : root.dimForeground
                     font.family: root.contentFontFamily
                     font.pixelSize: Style.font.bodySmall

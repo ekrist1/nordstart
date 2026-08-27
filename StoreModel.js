@@ -343,6 +343,23 @@ function storeRows(records, guards, pkgRows, opts) {
     for (var p = 0; p < pkgs.length; p++) curatedPackages[pkgs[p]] = true
   }
 
+  var pluginCount = 0
+  var plugins = opts.plugins || []
+  var pluginMatches = []
+  for (var pl = 0; pl < plugins.length; pl++) {
+    var plugin = plugins[pl]
+    if (query) {
+      var hay = (plugin.label + " " + plugin.pluginId).toLowerCase()
+      if (hay.indexOf(query) < 0) continue
+    }
+    pluginMatches.push(plugin)
+  }
+  if (pluginMatches.length) {
+    rows.push({ kind: "header", key: "hdr:plugins", label: "Plugins", selectable: false })
+    for (var pm = 0; pm < pluginMatches.length; pm++) rows.push(pluginMatches[pm])
+    pluginCount = pluginMatches.length
+  }
+
   var matchedCount = 0
   var lastCategory = ""
   for (var i = 0; i < (records || []).length; i++) {
@@ -398,7 +415,7 @@ function storeRows(records, guards, pkgRows, opts) {
     }
   }
 
-  return { rows: rows, appCount: matchedCount, packageCount: packageCount }
+  return { rows: rows, appCount: matchedCount, packageCount: packageCount, pluginCount: pluginCount }
 }
 
 function storeSelectableCount(rows) {
@@ -447,6 +464,158 @@ function storeMoveCursor(rows, index, delta) {
   return current
 }
 
+// ----------------------------------------------------------------- plugins
+//
+// Omarchy plugins live as git checkouts under ~/.config/omarchy/plugins/<id>.
+// Detecting an update is a fetch plus a rev-list; applying one is entirely
+// omarchy-plugin-update's job (it shows the diff, fast-forwards, validates and
+// rolls back on failure), so nothing here touches a repository.
+
+// Single-quote for bash. Plugin ids are validated before they get here; this
+// covers the install directory, which is a filesystem path and may hold spaces.
+function shellQuote(value) {
+  return "'" + String(value == null ? "" : value).split("'").join("'\\''") + "'"
+}
+
+// omarchy-plugin-update's own id rule. Ids reach a shell string, so anything
+// outside this is dropped rather than quoted around.
+function isSafePluginId(id) {
+  var value = String(id || "")
+  if (value.indexOf("..") >= 0) return false
+  return /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(value)
+}
+
+// First-party plugins ship with Omarchy and are updated by updating Omarchy,
+// so only third-party checkouts belong in this list.
+function parsePluginCatalog(raw) {
+  var parsed
+  try {
+    parsed = JSON.parse(String(raw || ""))
+  } catch (e) {
+    return []
+  }
+  if (!Array.isArray(parsed)) return []
+
+  var out = []
+  for (var i = 0; i < parsed.length; i++) {
+    var entry = parsed[i]
+    if (!entry || entry.firstParty === true) continue
+    if (!isSafePluginId(entry.id)) continue
+    if (!entry.sourceDir) continue
+
+    out.push({
+      id: String(entry.id),
+      name: String(entry.name || entry.id),
+      description: String(entry.description || ""),
+      dir: String(entry.sourceDir)
+    })
+  }
+
+  out.sort(function(a, b) {
+    var an = a.name.toLowerCase(), bn = b.name.toLowerCase()
+    return an < bn ? -1 : (an > bn ? 1 : 0)
+  })
+  return out
+}
+
+// One bash run for every plugin, the same way storeGuardScript batches the
+// app guards. Each check is ~0.5s of network latency rather than CPU, so they
+// run concurrently; each line is short enough to land atomically on the pipe.
+// The batch-mode flags are lifted from omarchy-plugin-update: without them a
+// repo needing credentials blocks the whole check on a hidden password prompt.
+function pluginCheckScript(records, cachePath) {
+  var checks = ""
+  for (var i = 0; i < (records || []).length; i++) {
+    var rec = records[i]
+    if (!rec || !isSafePluginId(rec.id) || !rec.dir) continue
+    checks += "__nordstart_check " + shellQuote(rec.id) + " " + shellQuote(rec.dir) + " &\n"
+  }
+  if (!checks) return ""
+
+  return "export GIT_TERMINAL_PROMPT=0\n"
+    + "export GIT_SSH_COMMAND=\"${GIT_SSH_COMMAND:-ssh -oBatchMode=yes}\"\n"
+    + "__nordstart_check() {\n"
+    + "  local id=\"$1\" dir=\"$2\" remote behind\n"
+    + "  if [[ ! -d $dir/.git ]]; then printf '%s\\tlocal\\t0\\t\\n' \"$id\"; return; fi\n"
+    + "  remote=$(git -C \"$dir\" remote get-url origin 2>/dev/null)\n"
+    + "  if ! git -C \"$dir\" fetch --quiet origin HEAD 2>/dev/null; then\n"
+    + "    printf '%s\\terror\\t0\\t%s\\n' \"$id\" \"$remote\"; return\n"
+    + "  fi\n"
+    + "  behind=$(git -C \"$dir\" rev-list --count HEAD..FETCH_HEAD 2>/dev/null)\n"
+    + "  [[ -n $behind ]] || behind=0\n"
+    + "  if (( behind > 0 )); then printf '%s\\tbehind\\t%s\\t%s\\n' \"$id\" \"$behind\" \"$remote\"\n"
+    + "  else printf '%s\\tok\\t0\\t%s\\n' \"$id\" \"$remote\"; fi\n"
+    + "}\n"
+    + "mkdir -p " + shellQuote(cachePath.replace(/\/[^/]*$/, "")) + " 2>/dev/null\n"
+    + "{\n" + checks + "wait\n} | tee " + shellQuote(cachePath) + "\n"
+}
+
+function parsePluginStatus(raw) {
+  var out = {}
+  var lines = String(raw || "").split("\n")
+
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i]
+    if (!line || !line.trim()) continue
+
+    var parts = line.split("\t")
+    if (parts.length < 2) continue
+
+    var id = parts[0].trim()
+    var state = parts[1].trim()
+    if (!id || ["ok", "behind", "local", "error"].indexOf(state) < 0) continue
+
+    var behind = parseInt(parts[2], 10)
+    out[id] = {
+      state: state,
+      behind: behind > 0 ? behind : 0,
+      remote: parts.length > 3 ? String(parts[3]).trim() : ""
+    }
+  }
+  return out
+}
+
+function pluginsBehind(status) {
+  var n = 0
+  for (var id in (status || {})) {
+    if (status[id] && status[id].state === "behind") n++
+  }
+  return n
+}
+
+function pluginDetail(state, behind) {
+  if (state === "behind") return "update \u00b7 " + behind + (behind === 1 ? " commit" : " commits")
+  if (state === "ok") return "up to date"
+  if (state === "local") return "local checkout"
+  if (state === "error") return "check failed"
+  return "not checked yet"
+}
+
+// Selectable even when there is nothing to do, so the cursor can rest on a row
+// and read why. pluginCommand is what refuses to act.
+function pluginRows(records, status) {
+  var rows = []
+  for (var i = 0; i < (records || []).length; i++) {
+    var rec = records[i]
+    var info = (status || {})[rec.id]
+    var state = info ? info.state : "unknown"
+    var behind = info ? info.behind : 0
+
+    rows.push({
+      kind: "plugin",
+      key: "plugin:" + rec.id,
+      pluginId: rec.id,
+      label: rec.name,
+      description: rec.description,
+      detail: pluginDetail(state, behind),
+      state: state,
+      behind: behind,
+      selectable: true
+    })
+  }
+  return rows
+}
+
 // ---------------------------------------------------------------- commands
 
 // pacman's own permitted set. Everything that reaches a shell string is
@@ -474,6 +643,19 @@ function storeCommand(row, kind) {
     return rec.installAction ? { mode: "shell", command: rec.installAction } : null
   }
 
+  if (row.kind === "plugin") {
+    // Only a repo that has actually moved is actionable; a local checkout or a
+    // failed check has nothing to apply.
+    if (row.state !== "behind" || !isSafePluginId(row.pluginId)) return null
+    // omarchy-plugin-update ends in `rescanPlugins`, which reloads the plugin
+    // entry but leaves the QML engine on its cached compilation — the updated
+    // code would not actually run. Restarting is what applies it.
+    return {
+      mode: "argv",
+      argv: [TERMINAL_WRAPPER, "omarchy-plugin-update " + row.pluginId + " && omarchy-restart-shell"]
+    }
+  }
+
   if (row.kind === "package") {
     if (!isSafePackageName(row.name)) return null
 
@@ -489,6 +671,7 @@ function storeCommand(row, kind) {
 
 function storeCanUninstall(row) {
   if (!row) return false
+  if (row.kind === "plugin") return false
   if (row.kind === "app") return !!(row.record && row.record.removeAction) && row.state === "installed"
   if (row.kind === "package") return row.state === "installed" && isSafePackageName(row.name)
   return false

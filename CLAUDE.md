@@ -65,6 +65,14 @@ and lives outside this repo — treat those as an external API surface, not some
   must never escalate privileges or run pacman/yay mutations itself.** The parsing, guard-batching
   and file-watching patterns are ported from the host's own `/usr/share/omarchy/shell/plugins/menu/`,
   which is the reference implementation to consult when changing any of this.
+
+  It also owns the installed-plugin list (same domain: things installed from a repo, not
+  workspaces). `omarchy-plugin-catalog` supplies the list, `pluginCheckScript` batches one
+  `git fetch` per plugin into a single subprocess the way `storeGuardScript` does, and applying an
+  update is entirely `omarchy-plugin-update`'s job — it shows the diff, fast-forwards, validates and
+  rolls back on failure. **Never git-mutate a plugin checkout from here.** The command appends
+  `&& omarchy-restart-shell` on purpose: `omarchy-plugin-update` ends in `rescanPlugins`, which does
+  not recompile QML (see the Commands note above), so without it an applied update would not run.
 - **`Panel.qml`** — the launcher popup UI and nearly all interactive state (focus section,
   cursor position, search query, session-confirm state, workspace preview). It imports
   `NordstartModel.js as Model` and calls into it for anything computable outside QML. Handles
@@ -105,7 +113,7 @@ and lives outside this repo — treat those as an external API surface, not some
   contract.
 - **`manifest.json`** — plugin metadata and the settings schema (`hoverOpen`,
   `showWorkspacePreview`, `workspaceCount`, `pinnedApps`, `appNames`, `appAliases`,
-  `appStoreEnabled`, `appStoreSearchAur`, `launchWorkspace`). Note `barWidget.defaults` and `barWidget.schema[].defaultValue`
+  `appStoreEnabled`, `appStoreSearchAur`, `launchWorkspace`, `pluginUpdateCheck`). Note `barWidget.defaults` and `barWidget.schema[].defaultValue`
   duplicate each other — a new setting has to be added to both. Keep this in
   sync with any new/renamed settings read via `setting(...)` in the QML files, since it's what
   drives the bar's settings panel UI and default values.

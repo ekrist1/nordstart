@@ -302,3 +302,147 @@ test("storeCommand builds the system update row and uninstall is gated on state"
   assert.equal(Store.storePrompt({ label: "Firefox" }), "uninstall Firefox?")
   assert.equal(Store.storeConfirmText({}), "Uninstall")
 })
+
+// A trimmed omarchy-plugin-catalog payload: one first-party plugin (which must
+// never be listed, since it updates with Omarchy itself) and two third-party.
+const PLUGIN_CATALOG = JSON.stringify([
+  { id: "omarchy.clock", name: "Clock", description: "", firstParty: true, sourceDir: "/usr/share/omarchy/shell/plugins/clock" },
+  { id: "mirador", name: "Mirador", description: "Workspace overview", firstParty: false, sourceDir: "/home/e/.config/omarchy/plugins/mirador" },
+  { id: "io.github.ekrist1.nordstart", name: "Nordstart", description: "Launcher", firstParty: false, sourceDir: "/home/e/.config/omarchy/plugins/io.github.ekrist1.nordstart" }
+])
+
+test("parsePluginCatalog keeps third-party plugins and sorts them by name", () => {
+  const records = Store.parsePluginCatalog(PLUGIN_CATALOG)
+  assert.equal(records.length, 2, "the first-party plugin is dropped")
+  assert.equal(records[0].name, "Mirador")
+  assert.equal(records[1].name, "Nordstart")
+  assert.equal(records[0].dir, "/home/e/.config/omarchy/plugins/mirador")
+
+  assert.equal(Store.parsePluginCatalog("not json").length, 0)
+  assert.equal(Store.parsePluginCatalog("{}").length, 0)
+  assert.equal(Store.parsePluginCatalog("").length, 0)
+
+  // An entry with no install directory cannot be checked, so it is not listed.
+  assert.equal(Store.parsePluginCatalog('[{"id":"x","firstParty":false}]').length, 0)
+})
+
+test("isSafePluginId matches omarchy-plugin-update's own rule", () => {
+  assert.ok(Store.isSafePluginId("mirador"))
+  assert.ok(Store.isSafePluginId("io.github.ekrist1.nordstart"))
+  assert.ok(Store.isSafePluginId("a-b_c.1"))
+
+  assert.ok(!Store.isSafePluginId("../../etc/passwd"))
+  assert.ok(!Store.isSafePluginId("a..b"))
+  assert.ok(!Store.isSafePluginId("foo; reboot"))
+  assert.ok(!Store.isSafePluginId("two words"))
+  assert.ok(!Store.isSafePluginId("-leading"))
+  assert.ok(!Store.isSafePluginId(""))
+})
+
+test("pluginCheckScript batches every plugin into one run and cannot be prompted", () => {
+  const records = Store.parsePluginCatalog(PLUGIN_CATALOG)
+  const script = Store.pluginCheckScript(records, "/home/e/.cache/nordstart/plugin-updates.tsv")
+
+  // Both batch-mode guards, lifted from omarchy-plugin-update: without them a
+  // repo needing credentials blocks the check on a hidden password prompt.
+  assert.ok(script.includes("GIT_TERMINAL_PROMPT=0"))
+  assert.ok(script.includes("BatchMode=yes"))
+
+  assert.ok(script.includes("__nordstart_check 'mirador'"))
+  assert.ok(script.includes("__nordstart_check 'io.github.ekrist1.nordstart'"))
+  assert.ok(!script.includes("omarchy.clock"), "first-party plugins are not checked")
+  assert.ok(script.includes("wait"), "fetches run concurrently")
+  assert.ok(script.includes("tee '/home/e/.cache/nordstart/plugin-updates.tsv'"))
+  assert.ok(script.includes("mkdir -p '/home/e/.cache/nordstart'"))
+
+  assert.equal(Store.pluginCheckScript([], "/tmp/x"), "", "nothing to check, nothing to run")
+
+  // A directory with a space still has to survive into the script intact.
+  const spaced = Store.pluginCheckScript([{ id: "ok", dir: "/home/e/my plugins/ok" }], "/tmp/x")
+  assert.ok(spaced.includes("'/home/e/my plugins/ok'"))
+})
+
+test("parsePluginStatus reads the TSV and ignores anything malformed", () => {
+  const status = Store.parsePluginStatus(
+    [
+      "mirador\tbehind\t3\thttps://github.com/sanjyay/Mirador.git",
+      "io.github.ekrist1.nordstart\tlocal\t0\t",
+      "weather\tok\t0\thttps://example.com/w.git",
+      "broken\terror\t0\t",
+      "nonsense",
+      "bad\tnotastate\t0\t",
+      ""
+    ].join("\n")
+  )
+
+  deepEq(status.mirador, { state: "behind", behind: 3, remote: "https://github.com/sanjyay/Mirador.git" })
+  assert.equal(status["io.github.ekrist1.nordstart"].state, "local")
+  assert.equal(status.weather.state, "ok")
+  assert.equal(status.broken.state, "error")
+  assert.equal(status.nonsense, undefined)
+  assert.equal(status.bad, undefined, "an unknown state is not trusted")
+
+  assert.equal(Store.pluginsBehind(status), 1)
+  assert.equal(Store.pluginsBehind({}), 0)
+  assert.equal(Store.pluginsBehind(null), 0)
+})
+
+test("pluginRows explains every state, including one never checked", () => {
+  const records = Store.parsePluginCatalog(PLUGIN_CATALOG)
+  const status = Store.parsePluginStatus("mirador\tbehind\t1\thttps://x\nio.github.ekrist1.nordstart\tlocal\t0\t")
+  const rows = Store.pluginRows(records, status)
+
+  assert.equal(rows[0].detail, "update · 1 commit", "singular")
+  assert.equal(rows[1].detail, "local checkout")
+  assert.equal(Store.pluginRows(records, {})[0].detail, "not checked yet")
+
+  const many = Store.parsePluginStatus("mirador\tbehind\t4\thttps://x")
+  assert.equal(Store.pluginRows(records, many)[0].detail, "update · 4 commits")
+
+  // Every row is selectable so the cursor can rest on it and read why; it is
+  // pluginCommand that refuses to act.
+  assert.ok(rows.every((r) => r.selectable))
+})
+
+test("pluginCommand only acts on a repo that has actually moved", () => {
+  const behind = { kind: "plugin", pluginId: "mirador", state: "behind" }
+  const cmd = Store.storeCommand(behind)
+
+  assert.equal(cmd.mode, "argv", "assembled by us, so it goes out as argv")
+  assert.equal(cmd.argv[0], "omarchy-launch-floating-terminal-with-presentation")
+  // The restart is the point: omarchy-plugin-update ends in rescanPlugins,
+  // which leaves the QML engine on its cached compilation.
+  assert.equal(cmd.argv[1], "omarchy-plugin-update mirador && omarchy-restart-shell")
+
+  assert.equal(Store.storeCommand({ kind: "plugin", pluginId: "mirador", state: "ok" }), null)
+  assert.equal(Store.storeCommand({ kind: "plugin", pluginId: "mirador", state: "local" }), null)
+  assert.equal(Store.storeCommand({ kind: "plugin", pluginId: "mirador", state: "error" }), null)
+  assert.equal(Store.storeCommand({ kind: "plugin", pluginId: "../evil", state: "behind" }), null)
+
+  assert.ok(!Store.storeCanUninstall(behind), "x never removes a plugin")
+})
+
+test("storeRows puts plugins in their own section and filters them by query", () => {
+  const records = Store.storeCatalog(Store.parseMenuJsonc(MENU), [])
+  const plugins = Store.pluginRows(
+    Store.parsePluginCatalog(PLUGIN_CATALOG),
+    Store.parsePluginStatus("mirador\tbehind\t2\thttps://x")
+  )
+
+  const idle = Store.storeRows(records, {}, [], { plugins: plugins })
+  assert.equal(idle.pluginCount, 2)
+  assert.equal(idle.rows[0].kind, "header")
+  assert.equal(idle.rows[0].label, "Plugins", "plugins lead, above the app categories")
+  assert.equal(idle.rows[1].kind, "plugin")
+
+  const searched = Store.storeRows(records, {}, [], { plugins: plugins, query: "mirador" })
+  assert.equal(searched.pluginCount, 1)
+  assert.equal(searched.appCount, 0)
+
+  const missed = Store.storeRows(records, {}, [], { plugins: plugins, query: "firefox" })
+  assert.equal(missed.pluginCount, 0, "no plugin header when nothing matches")
+  assert.ok(!missed.rows.some((r) => r.key === "hdr:plugins"))
+
+  // With no plugins the store list is exactly what it was before.
+  assert.equal(Store.storeRows(records, {}, [], {}).pluginCount, 0)
+})
