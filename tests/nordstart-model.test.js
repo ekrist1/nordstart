@@ -229,6 +229,61 @@ test("app list cursor clamps and session commands map", () => {
   assert.equal(Model.sessionNeedsConfirm("logout"), false)
 })
 
+test("companion catalog labels, keys, and install commands", () => {
+  const missing = {}
+  const themeReady = { themeCli: true, themeDir: true }
+  const themePartial = { themeDir: true }
+  const settingsReady = { settingsInstalled: true, settingsOnBar: true }
+  const settingsInstalled = { settingsInstalled: true }
+
+  assert.equal(Model.companionSettingsId(), "io.github.ekrist1.nordsettings")
+  assert.equal(Model.companionThemeMenu(), "style.nordtema")
+  assert.equal(Model.companionKey("theme"), "t")
+  assert.equal(Model.companionKey("settings"), "c")
+  assert.equal(Model.companionForKey("t"), "theme")
+  assert.equal(Model.companionForKey("C"), "settings")
+  assert.equal(Model.companionForKey("x"), "")
+
+  assert.equal(Model.companionLabel("theme", missing), "Install theme")
+  assert.equal(Model.companionLabel("theme", themeReady), "Theme")
+  assert.equal(Model.companionLabel("theme", themePartial), "Theme")
+  assert.equal(Model.companionLabel("settings", missing), "Install Hyprland")
+  assert.equal(Model.companionLabel("settings", settingsInstalled), "Hyprland")
+
+  assert.equal(Model.companionReady("theme", missing), false)
+  assert.equal(Model.companionReady("theme", themePartial), false)
+  assert.equal(Model.companionReady("theme", themeReady), true)
+  assert.equal(Model.companionReady("settings", settingsInstalled), false)
+  assert.equal(Model.companionReady("settings", settingsReady), true)
+
+  assert.equal(Model.companionKnown("theme", themePartial), true)
+  assert.equal(Model.companionKnown("settings", missing), false)
+
+  assert.equal(Model.companionPrompt("theme").indexOf("Nordtema") >= 0, true)
+  assert.equal(Model.companionConfirmText("theme"), "Install")
+  assert.equal(Model.companionInstallCommand("nope"), null)
+
+  const themeInstall = Model.companionInstallCommand("theme", missing)
+  assert.equal(themeInstall.mode, "argv")
+  assert.equal(themeInstall.argv[0], "omarchy-launch-floating-terminal-with-presentation")
+  assert.equal(
+    themeInstall.argv[1],
+    "omarchy theme install https://github.com/ekrist1/nordtema && bash \"$HOME/.config/omarchy/themes/nordtema/install.sh\""
+  )
+  assert.equal(Model.companionInstallCommand("theme", themeReady), null)
+
+  const finishTheme = Model.companionInstallCommand("theme", themePartial)
+  assert.equal(finishTheme.argv[1], "bash \"$HOME/.config/omarchy/themes/nordtema/install.sh\"")
+
+  const settingsInstall = Model.companionInstallCommand("settings", missing)
+  assert.equal(settingsInstall.mode, "argv")
+  assert.equal(
+    settingsInstall.argv[1],
+    "omarchy plugin add https://github.com/ekrist1/nordsettings.git --enable --yes"
+  )
+  assert.equal(Model.companionInstallCommand("settings", settingsInstalled), null)
+})
+
 test("findRunningToplevels returns every window of an app, workspace-ordered", () => {
   const a = toplevel("ghostty", "one", { address: "0xA" })
   const b = toplevel("ghostty", "two", { address: "0xB" })

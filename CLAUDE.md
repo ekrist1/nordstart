@@ -63,8 +63,8 @@ and lives outside this repo — treat those as an external API surface, not some
 
 - **`NordstartModel.js`** (`.pragma library`) — all pure logic: desktop-id alias resolution,
   friendly app-name lookup, workspace/toplevel presentation, pinned-app parsing/toggling
-  (`shell.json`'s `pinnedApps` string), catalog building, and cursor-movement math for keyboard
-  navigation. It has no QML/Quickshell dependencies, which is exactly why it's unit-testable in
+  (`shell.json`'s `pinnedApps` string), catalog building, cursor-movement math for keyboard
+  navigation, and companion (Nordtema / Nordsettings) labels plus install-command construction. It has no QML/Quickshell dependencies, which is exactly why it's unit-testable in
   plain Node (see `tests/nordstart-model.test.js`, which loads it via `vm.runInContext` after
   stripping the `.pragma library` line since Node doesn't understand that QML directive).
   When changing behavior around naming, aliasing, pinning, or navigation, this is almost always
@@ -133,6 +133,15 @@ and lives outside this repo — treat those as an external API surface, not some
   traps documented in the host's `Menu.qml`: a `Process` silently ignores a `command` change while
   it is running (hence the `guardsPending` / `searchPending` flags), and a killed process still
   reports `exitCode === 0`, so `exitStatus` is what says the run actually finished.
+
+  Companion footer buttons (left of logout/reboot/poweroff) open Nordtema and Nordsettings.
+  Detection is `FileView` for Nordtema's CLI / `install.sh`, and `pluginRegistry` for
+  Nordsettings. Opening a present companion goes through the host (`shell.summon` for the
+  Nordtema menu route `style.nordtema`, `bar.summonBarWidget` for Nordsettings) so this
+  plugin never embeds those UIs. A missing companion confirms, then
+  `omarchy-launch-floating-terminal-with-presentation` runs `omarchy theme install` or
+  `omarchy plugin add` — same rule as the store, never clone or enable from here.
+  Install URLs live as constants in `NordstartModel.js` (`companionInstallCommand`).
 - **`BarWidget.qml`** — the small bar-icon entry point. Lazily loads `Panel.qml` via a `Loader`,
   wires up the `IpcHandler` (`omarchy-shell shell toggle io.github.ekrist1.nordstart`, plus
   open/close/show/hide), hover-to-open behavior, and the bar's click-target/tooltip registration

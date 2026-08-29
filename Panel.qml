@@ -49,6 +49,7 @@ Panel {
   property string searchQuery: ""
   property int appCursor: 0
   property string sessionConfirm: ""
+  property string companionConfirm: ""
   property bool swallowSearchChar: false
   // appId -> address of the window we last sent the user to, so repeated
   // activation walks through an app's windows instead of re-focusing one.
@@ -110,7 +111,34 @@ Panel {
   readonly property bool overlayView: root.browsingApps || root.browsingStore
   readonly property bool confirmingSession: root.sessionConfirm !== ""
   readonly property bool confirmingStore: root.storeConfirmRow !== null
-  readonly property bool confirmingAny: root.confirmingSession || root.confirmingStore
+  readonly property bool confirmingCompanion: root.companionConfirm !== ""
+  readonly property bool confirmingAny: root.confirmingSession || root.confirmingStore || root.confirmingCompanion
+
+  readonly property bool nordtemaCliPresent: nordtemaCliFile.present
+  readonly property bool nordtemaDirPresent: nordtemaDirFile.present
+  readonly property var pluginRegistry: {
+    var shell = root.bar && root.bar.shell ? root.bar.shell : null
+    return shell && shell.pluginRegistry ? shell.pluginRegistry : null
+  }
+  readonly property int pluginRegistryRevision: root.pluginRegistry ? root.pluginRegistry.registryRevision : 0
+  readonly property bool nordsettingsInstalled: {
+    var _ = root.pluginRegistryRevision
+    var plugins = root.pluginRegistry ? root.pluginRegistry.installedPlugins : null
+    return !!(plugins && plugins[Model.companionSettingsId()])
+  }
+  readonly property bool nordsettingsOnBar: {
+    var _ = root.pluginRegistryRevision
+    var __ = root.bar ? root.bar.moduleSlots : null
+    if (root.pluginRegistry && typeof root.pluginRegistry.inBar === "function")
+      return root.pluginRegistry.inBar(Model.companionSettingsId()) === true
+    return root.findCompanionWidget(Model.companionSettingsId()) !== null
+  }
+  readonly property var companionFacts: ({
+    themeCli: root.nordtemaCliPresent,
+    themeDir: root.nordtemaDirPresent,
+    settingsInstalled: root.nordsettingsInstalled,
+    settingsOnBar: root.nordsettingsOnBar
+  })
 
   readonly property string launchWorkspaceMode: Model.parseLaunchWorkspace(setting("launchWorkspace", null))
   readonly property bool storeEnabled: setting("appStoreEnabled", true) === true
@@ -156,6 +184,7 @@ Panel {
     root.storeCursor = 0
     root.storePackages = []
     root.sessionConfirm = ""
+    root.companionConfirm = ""
     root.storeConfirmRow = null
     if (root.appLibrary && typeof root.appLibrary.refreshIcons === "function")
       root.appLibrary.refreshIcons()
@@ -383,7 +412,110 @@ Panel {
     var event = { key: key, modifiers: modifiers || 0 }
     if (root.confirmingSession) return sessionConfirmDialog.handleKey(event)
     if (root.confirmingStore) return storeConfirmDialog.handleKey(event)
+    if (root.confirmingCompanion) return companionConfirmDialog.handleKey(event)
     return false
+  }
+
+  function findCompanionWidget(pluginId) {
+    if (!root.bar || typeof root.bar.findPanelWidget !== "function") return null
+    return root.bar.findPanelWidget(pluginId)
+  }
+
+  function companionShell() {
+    return root.bar && root.bar.shell ? root.bar.shell : null
+  }
+
+  function openCompanion(id) {
+    if (root.confirmingAny) return
+    if (id === "theme") {
+      if (Model.companionReady("theme", root.companionFacts)) {
+        root.openThemeMenu()
+        return
+      }
+      if (Model.companionKnown("theme", root.companionFacts)) {
+        root.runCompanionInstall("theme")
+        return
+      }
+      root.requestCompanionInstall("theme")
+      return
+    }
+    if (id === "settings") {
+      if (Model.companionReady("settings", root.companionFacts)) {
+        root.openSettingsPanel()
+        return
+      }
+      if (Model.companionKnown("settings", root.companionFacts)) {
+        root.enableSettingsWidget()
+        return
+      }
+      root.requestCompanionInstall("settings")
+    }
+  }
+
+  function openThemeMenu() {
+    var payload = "{\"menu\":\"" + Model.companionThemeMenu() + "\"}"
+    var shell = root.companionShell()
+    root.close()
+    Qt.callLater(function() {
+      if (shell && typeof shell.summon === "function")
+        shell.summon("omarchy.menu", payload)
+      else if (root.bar)
+        root.bar.run("omarchy-shell shell summon omarchy.menu " + Util.shellQuote(payload))
+      else
+        Util.execDetached("omarchy-shell shell summon omarchy.menu " + Util.shellQuote(payload))
+    })
+  }
+
+  function openSettingsPanel() {
+    if (root.bar && typeof root.bar.summonBarWidget === "function"
+        && root.bar.summonBarWidget(Model.companionSettingsId()))
+      return
+    var shell = root.companionShell()
+    if (shell && typeof shell.summon === "function") {
+      root.close()
+      Qt.callLater(function() { shell.summon(Model.companionSettingsId(), "") })
+      return
+    }
+    root.close()
+    if (root.bar)
+      root.bar.run("omarchy-shell shell summon " + Model.companionSettingsId())
+    else
+      Util.execDetached("omarchy-shell shell summon " + Model.companionSettingsId())
+  }
+
+  function enableSettingsWidget() {
+    var registry = root.pluginRegistry
+    if (registry && typeof registry.putBarWidget === "function") {
+      registry.putBarWidget(Model.companionSettingsId(), { section: "right" })
+      Qt.callLater(function() { root.openSettingsPanel() })
+      return
+    }
+    root.close()
+    var command = "omarchy plugin enable " + Model.companionSettingsId() + " --section right"
+    if (root.bar) root.bar.run(command)
+    else Util.execDetached(command)
+  }
+
+  function requestCompanionInstall(id) {
+    if (!Model.companionInstallCommand(id, root.companionFacts)) return
+    root.companionConfirm = id
+    companionConfirmDialog.selectedIndex = 1
+    keyCatcher.forceActiveFocus()
+  }
+
+  function confirmCompanionInstall() {
+    var id = root.companionConfirm
+    root.companionConfirm = ""
+    if (id) root.runCompanionInstall(id)
+  }
+
+  function runCompanionInstall(id) {
+    var command = Model.companionInstallCommand(id, root.companionFacts)
+    if (!command) return
+    root.close()
+    if (command.mode === "argv") Util.execArgv(command.argv)
+    else if (root.bar) root.bar.run(command.command)
+    else Util.execDetached(command.command)
   }
 
   function activateCursor() {
@@ -456,6 +588,7 @@ Panel {
   function enterView(name, focusSearch) {
     if (focusSearch !== false) focusSearch = true
     root.sessionConfirm = ""
+    root.companionConfirm = ""
     root.storeConfirmRow = null
     root.view = name
     if (root.appCursor >= root.catalog.length) root.appCursor = 0
@@ -479,6 +612,7 @@ Panel {
     root.storeCursor = 0
     root.storePackages = []
     root.sessionConfirm = ""
+    root.companionConfirm = ""
     root.storeConfirmRow = null
     if (searchInput.text !== "") searchInput.text = ""
     keyCatcher.forceActiveFocus()
@@ -808,6 +942,31 @@ Panel {
     onFileChanged: reload()
   }
 
+  // Nordtema's CLI is a bash script, so FileView can watch it as text. Present
+  // means install.sh has been run; the sibling FileView covers a clone that
+  // has not been finished yet.
+  FileView {
+    id: nordtemaCliFile
+    property bool present: false
+    path: Quickshell.env("HOME") + "/.config/omarchy/themes/nordtema/bin/nordtema"
+    watchChanges: true
+    printErrors: false
+    onLoaded: present = true
+    onLoadFailed: present = false
+    onFileChanged: reload()
+  }
+
+  FileView {
+    id: nordtemaDirFile
+    property bool present: false
+    path: Quickshell.env("HOME") + "/.config/omarchy/themes/nordtema/install.sh"
+    watchChanges: true
+    printErrors: false
+    onLoaded: present = true
+    onLoadFailed: present = false
+    onFileChanged: reload()
+  }
+
   KeyboardPanel {
     id: panel
     anchorItem: root.anchorItem
@@ -859,6 +1018,11 @@ Panel {
         }
         if (key === "n" && !root.browsingStore) {
           root.launchNewInstance(root.currentApp())
+          return
+        }
+        var companionId = Model.companionForKey(key)
+        if (companionId) {
+          root.openCompanion(companionId)
           return
         }
         if (t >= "1" && t <= "9") root.handleDigit(t)
@@ -1786,6 +1950,29 @@ Panel {
               }
 
               SessionButton {
+                glyph: "󰸌"
+                hint: Model.companionKey("theme")
+                label: Model.companionLabel("theme", root.companionFacts)
+                muted: !Model.companionKnown("theme", root.companionFacts)
+                onActivated: root.openCompanion("theme")
+              }
+              SessionButton {
+                glyph: "󰕴"
+                hint: Model.companionKey("settings")
+                label: Model.companionLabel("settings", root.companionFacts)
+                muted: !Model.companionKnown("settings", root.companionFacts)
+                onActivated: root.openCompanion("settings")
+              }
+
+              Rectangle {
+                width: Style.spacing.hairline
+                height: Style.space(16)
+                anchors.verticalCenter: parent.verticalCenter
+                color: root.contentForeground
+                opacity: 0.18
+              }
+
+              SessionButton {
                 glyph: "󰍃"
                 label: "Log out"
                 onActivated: root.requestSession("logout")
@@ -1834,17 +2021,37 @@ Panel {
         onCanceled: root.storeConfirmRow = null
         onConfirmed: root.confirmStoreUninstall()
       }
+
+      ConfirmDialog {
+        id: companionConfirmDialog
+        anchors.fill: parent
+        z: 20
+        opened: root.confirmingCompanion
+        message: Model.companionPrompt(root.companionConfirm)
+        confirmText: Model.companionConfirmText(root.companionConfirm)
+        background: Color.popups.background
+        foreground: root.contentForeground
+        selectedText: Color.accent
+        fontFamily: root.contentFontFamily
+        onCanceled: root.companionConfirm = ""
+        onConfirmed: root.confirmCompanionInstall()
+      }
     }
   }
 
   component SessionButton: Item {
     id: btn
     property string glyph: ""
+    property string hint: ""
     property string label: ""
     property bool danger: false
+    property bool muted: false
     signal activated()
 
     readonly property bool hot: area.containsMouse
+    readonly property color ink: btn.hot && btn.danger
+      ? Color.urgent
+      : (btn.muted && !btn.hot ? root.dimForeground : root.contentForeground)
     implicitHeight: Style.space(26)
     implicitWidth: inner.implicitWidth + Style.space(10)
 
@@ -1862,8 +2069,17 @@ Panel {
       spacing: Style.space(6)
 
       Text {
+        visible: btn.hint !== ""
+        text: btn.hint
+        color: root.keyHintForeground
+        font.family: root.contentFontFamily
+        font.pixelSize: Style.font.subtitle
+        anchors.verticalCenter: parent.verticalCenter
+      }
+
+      Text {
         text: btn.glyph
-        color: btn.hot && btn.danger ? Color.urgent : root.contentForeground
+        color: btn.ink
         font.family: root.contentFontFamily
         font.pixelSize: Style.font.subtitle
       }
@@ -1871,7 +2087,7 @@ Panel {
       Text {
         visible: btn.hot
         text: btn.label
-        color: btn.hot && btn.danger ? Color.urgent : root.contentForeground
+        color: btn.ink
         font.family: root.contentFontFamily
         font.pixelSize: Style.font.bodySmall
         anchors.verticalCenter: parent.verticalCenter

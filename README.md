@@ -113,7 +113,13 @@ omarchy-shell shell toggle io.github.ekrist1.nordstart
   for a password and never runs a package command directly. The panel closes
   when the terminal takes over; reopen it to see the updated state.
 - The footer icons log out immediately, and ask for confirmation before
-  reboot or power off (`Enter` confirms, `Esc` cancels).
+  reboot or power off (`Enter` confirms, `Esc` cancels). To the left of
+  those sit **Theme** (`t`) and **Hyprland** (`c`). Theme opens Nordtema's
+  variant / bar-style / day-night menu. Hyprland opens Nordsettings' look-and-feel
+  panel (and puts it on the bar if it is installed but not enabled yet).
+  If either companion is missing, the same button offers to install it
+  from git in a floating terminal — Nordstart never clones or enables
+  anything itself.
 - Escape or a click outside the modal closes it. Tab and Shift+Tab move to
   the next or previous bar panel (clock, weather, and so on), including
   panels in other bar sections.

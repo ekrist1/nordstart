@@ -984,6 +984,147 @@ function sessionNeedsConfirm(id) {
   return !!(action && action.confirm)
 }
 
+// ---------------------------------------------------------------- companions
+//
+// Nordtema (theme) and Nordsettings (Hyprland look-and-feel) are separate
+// repos. The footer offers them next to the session buttons: open if they
+// are already there, otherwise install from git in a floating terminal —
+// the same pattern as the store, so this plugin never clones or enables
+// anything itself.
+
+var COMPANION_TERMINAL = "omarchy-launch-floating-terminal-with-presentation"
+var COMPANION_THEME_REPO = "https://github.com/ekrist1/nordtema"
+var COMPANION_SETTINGS_REPO = "https://github.com/ekrist1/nordsettings.git"
+var COMPANION_SETTINGS_ID = "io.github.ekrist1.nordsettings"
+var COMPANION_THEME_MENU = "style.nordtema"
+
+var COMPANIONS = {
+  theme: {
+    id: "theme",
+    key: "t",
+    label: "Theme",
+    missingLabel: "Install theme",
+    prompt: "install Nordtema? this applies the Slate palette.",
+    confirmText: "Install"
+  },
+  settings: {
+    id: "settings",
+    key: "c",
+    pluginId: COMPANION_SETTINGS_ID,
+    label: "Hyprland",
+    missingLabel: "Install Hyprland",
+    prompt: "install Nordsettings? this adds Hyprland look-and-feel settings to the bar.",
+    confirmText: "Install"
+  }
+}
+
+function companion(id) {
+  return COMPANIONS[id] || null
+}
+
+function companionSettingsId() {
+  return COMPANION_SETTINGS_ID
+}
+
+function companionThemeMenu() {
+  return COMPANION_THEME_MENU
+}
+
+// facts.themeCli: nordtema CLI is executable (install.sh has been run)
+// facts.themeDir: the theme tree is on disk (clone without install.sh)
+// facts.settingsInstalled: plugin is in the shell registry
+// facts.settingsOnBar: its bar widget is live
+function companionFacts(facts) {
+  var value = facts || {}
+  return {
+    themeCli: !!value.themeCli,
+    themeDir: !!value.themeDir,
+    settingsInstalled: !!value.settingsInstalled,
+    settingsOnBar: !!value.settingsOnBar
+  }
+}
+
+function companionKnown(id, facts) {
+  var f = companionFacts(facts)
+  if (id === "theme") return f.themeCli || f.themeDir
+  if (id === "settings") return f.settingsInstalled || f.settingsOnBar
+  return false
+}
+
+function companionReady(id, facts) {
+  var f = companionFacts(facts)
+  if (id === "theme") return f.themeCli
+  if (id === "settings") return f.settingsOnBar
+  return false
+}
+
+function companionLabel(id, facts) {
+  var item = companion(id)
+  if (!item) return ""
+  return companionKnown(id, facts) ? item.label : item.missingLabel
+}
+
+function companionPrompt(id) {
+  var item = companion(id)
+  return item ? item.prompt : ""
+}
+
+function companionConfirmText(id) {
+  var item = companion(id)
+  return item ? item.confirmText : "Install"
+}
+
+function companionKey(id) {
+  var item = companion(id)
+  return item ? item.key : ""
+}
+
+function companionForKey(key) {
+  var value = String(key || "").toLowerCase()
+  if (!value) return ""
+  for (var id in COMPANIONS) {
+    if (COMPANIONS[id].key === value) return id
+  }
+  return ""
+}
+
+// A trusted argv for the floating terminal. URLs are constants, never
+// interpolated from user input. `$HOME` is expanded by bash in that terminal.
+function companionInstallCommand(id, facts) {
+  var f = companionFacts(facts)
+
+  if (id === "theme") {
+    if (f.themeDir && !f.themeCli) {
+      return {
+        mode: "argv",
+        argv: [COMPANION_TERMINAL, "bash \"$HOME/.config/omarchy/themes/nordtema/install.sh\""]
+      }
+    }
+    if (f.themeCli) return null
+    return {
+      mode: "argv",
+      argv: [
+        COMPANION_TERMINAL,
+        "omarchy theme install " + COMPANION_THEME_REPO
+          + " && bash \"$HOME/.config/omarchy/themes/nordtema/install.sh\""
+      ]
+    }
+  }
+
+  if (id === "settings") {
+    if (f.settingsInstalled || f.settingsOnBar) return null
+    return {
+      mode: "argv",
+      argv: [
+        COMPANION_TERMINAL,
+        "omarchy plugin add " + COMPANION_SETTINGS_REPO + " --enable --yes"
+      ]
+    }
+  }
+
+  return null
+}
+
 function moveCursor(section, workspaceId, pinnedIndex, dx, dy, workspaceCount, pinnedCount) {
   var columns = 3
   if (section === "pinned") {

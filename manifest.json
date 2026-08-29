@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "id": "io.github.ekrist1.nordstart",
   "name": "Nordstart",
-  "version": "1.9.0",
+  "version": "1.10.0",
   "author": "espen",
   "license": "MIT",
-  "description": "Workspace launcher with pinned apps, an installed-app search, an app store, and session actions",
+  "description": "Workspace launcher with pinned apps, an installed-app search, an app store, session actions, and shortcuts to Nordtema and Nordsettings",
   "homepage": "",
   "kinds": [
     "bar-widget"
@@ -15,7 +15,7 @@
   },
   "barWidget": {
     "displayName": "Nordstart",
-    "description": "Workspace, pinned-app and app-store launcher",
+    "description": "Workspace, pinned-app, store, theme and Hyprland launcher",
     "category": "Compositor",
     "allowMultiple": false,
     "defaultSection": "left",
