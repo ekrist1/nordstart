@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.ekrist1.nordstart",
   "name": "Nordstart",
-  "version": "1.11.0",
+  "version": "1.12.1",
   "author": "espen",
   "license": "MIT",
   "description": "Workspace launcher with pinned apps, an installed-app search, an app store, session actions, and shortcuts to Nordtema and Nordsettings",
@@ -21,7 +21,12 @@
     "defaultSection": "left",
     "defaults": {
       "workspaceCount": 9,
-      "hoverOpen": true,
+      "hoverOpen": false,
+      "workspaceBarStyle": "Workspace pills",
+      "workspaceBarVisibility": "First five and occupied",
+      "workspaceHoverPreview": "Window list",
+      "workspaceIconStyle": "Monochrome",
+      "showLauncherButton": true,
       "showWorkspacePreview": true,
       "pinnedApps": "firefox,code,thunderbird,tableplus,onlyoffice-desktopeditors",
       "appNames": "",
@@ -37,6 +42,59 @@
       "showScratchpad": true
     },
     "schema": [
+      {
+        "key": "workspaceBarStyle",
+        "type": "enum",
+        "label": "Workspace bar",
+        "options": [
+          "Workspace pills",
+          "Grid icon"
+        ],
+        "defaultValue": "Workspace pills",
+        "description": "Show workspace numbers with the primary app icon, or keep Nordstart's original grid-only bar entry."
+      },
+      {
+        "key": "workspaceBarVisibility",
+        "type": "enum",
+        "label": "Workspace pills shown",
+        "options": [
+          "First five and occupied",
+          "Active and occupied",
+          "All"
+        ],
+        "defaultValue": "First five and occupied",
+        "description": "Show empty pills for workspaces 1–5 like Omarchy, only active/occupied workspaces, or every configured workspace. Occupied higher workspaces are always included."
+      },
+      {
+        "key": "workspaceIconStyle",
+        "type": "enum",
+        "label": "Workspace icons",
+        "options": [
+          "Monochrome",
+          "Original colors"
+        ],
+        "defaultValue": "Monochrome",
+        "description": "Tint app icons to the bar foreground for a negative-style look, or retain their original colors."
+      },
+      {
+        "key": "workspaceHoverPreview",
+        "type": "enum",
+        "label": "Workspace hover",
+        "options": [
+          "Window list",
+          "Live preview",
+          "Off"
+        ],
+        "defaultValue": "Window list",
+        "description": "Hover a workspace pill for its windows, optionally with a live graphical preview. Click a window to focus it."
+      },
+      {
+        "key": "showLauncherButton",
+        "type": "boolean",
+        "label": "Nordstart grid button",
+        "defaultValue": true,
+        "description": "Keep the 3×3 button beside the workspace pills for opening the full Nordstart launcher."
+      },
       {
         "key": "hoverOpen",
         "type": "boolean",
@@ -158,5 +216,8 @@
         "description": "Show Hyprland's scratchpad (its special workspace) under the grid, with what is stashed in it. Press 0 to toggle it."
       }
     ]
+  },
+  "omarchy": {
+    "clonedFrom": "omarchy.workspaces"
   }
 }

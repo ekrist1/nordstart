@@ -1,7 +1,8 @@
 # Nordstart
 
-An [Omarchy](https://omarchy.org) shell plugin that opens a workspace launcher
-from a 3×3 grid icon on the top bar.
+An [Omarchy](https://omarchy.org) shell plugin that replaces the stock workspace
+numbers with compact number-and-app-icon pills and keeps a 3×3 grid button for
+opening the full workspace launcher.
 
 The modal has two halves:
 
@@ -25,7 +26,7 @@ This plugin is made with Grok AI. The code is not guaranteed to be correct and m
 
 ```bash
 omarchy plugin add https://github.com/ekrist1/nordstart.git --enable --yes
-omarchy bar move io.github.ekrist1.nordstart --after omarchy.workspaces
+omarchy restart shell
 ```
 
 From this folder, without git:
@@ -36,7 +37,21 @@ mkdir -p ~/.config/omarchy/plugins
 rsync -a --delete --exclude .git ./ ~/.config/omarchy/plugins/io.github.ekrist1.nordstart/
 omarchy-restart-shell
 omarchy plugin enable io.github.ekrist1.nordstart --yes
-omarchy bar move io.github.ekrist1.nordstart --after omarchy.workspaces
+```
+
+Nordstart uses Omarchy's supported `clonedFrom` mechanism to take the stock
+workspace widget's position. There is no separate `omarchy bar move` step, and
+another plugin that also replaces `omarchy.workspaces` should not be enabled at
+the same time.
+
+When upgrading an already-enabled Nordstart installation from a release before
+the workspace pills, reapply the clone once so the old workspace entry is
+removed:
+
+```bash
+omarchy plugin disable io.github.ekrist1.nordstart
+omarchy plugin enable io.github.ekrist1.nordstart
+omarchy restart shell
 ```
 
 Re-syncing after an edit needs `omarchy-restart-shell`, not
@@ -66,8 +81,11 @@ omarchy-shell shell toggle io.github.ekrist1.nordstart
 
 ## Use
 
-- Hover or click the grid icon on the bar (to the right of the workspace
-  numbers) to open the launcher.
+- Click a workspace pill to switch to it. Each occupied pill shows the primary
+  app's icon; by default unused workspaces stay hidden so the bar remains
+  compact. Hover a pill for its window list and click a row to focus that exact
+  window. The hover card can optionally include a live graphical preview.
+- Hover or click the grid icon beside the workspace pills to open the launcher.
 - Click a workspace, or press its number, to switch to it. With workspace
   preview on, the right side shows a live view of that workspace's window.
 - Click a pinned app to go to it if it is running, or to start it if it is
@@ -160,6 +178,11 @@ Tune the widget from the bar settings panel, or inline in
 {
   "id": "io.github.ekrist1.nordstart",
   "hoverOpen": true,
+  "workspaceBarStyle": "Workspace pills",
+  "workspaceBarVisibility": "First five and occupied",
+  "workspaceHoverPreview": "Window list",
+  "workspaceIconStyle": "Monochrome",
+  "showLauncherButton": true,
   "showWorkspacePreview": true,
   "workspaceCount": 9,
   "workspaceNames": "",
@@ -175,6 +198,14 @@ Tune the widget from the bar settings panel, or inline in
   "pluginUpdateCheck": "On"
 }
 ```
+
+`workspaceBarStyle` switches between the new pills and Nordstart's original
+grid-only entry. `workspaceBarVisibility` defaults to empty pills for 1–5 plus
+any occupied higher workspace; it can instead show only active/occupied or all
+configured workspaces. `workspaceIconStyle` switches between monochrome
+foreground-tinted icons and original app colors. `workspaceHoverPreview` accepts
+`Window list`, `Live preview`, or `Off`; `showLauncherButton` controls the 3×3
+button when pills are enabled.
 
 `launchWorkspace` decides where an app opens when you start it: `Current
 workspace` (the default) leaves you where you are, `First empty workspace`

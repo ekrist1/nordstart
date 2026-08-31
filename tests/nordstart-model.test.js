@@ -136,6 +136,20 @@ test("first empty workspace and clamp", () => {
   assert.equal(Model.firstEmptyWorkspace(9, spaces), 2)
 })
 
+test("workspace bar can show compact or all workspace ids", () => {
+  const spaces = {
+    values: [
+      workspace(1, [toplevel("Alacritty", "one")]),
+      workspace(2, []),
+      workspace(4, [toplevel("firefox", "four")]),
+      workspace(6, [toplevel("code", "six")])
+    ]
+  }
+  assert.deepEqual(Array.from(Model.workspaceBarIds(7, spaces, 2, "Active and occupied")), [1, 2, 4, 6])
+  assert.deepEqual(Array.from(Model.workspaceBarIds(7, spaces, 2, "First five and occupied")), [1, 2, 3, 4, 5, 6])
+  assert.deepEqual(Array.from(Model.workspaceBarIds(5, spaces, 2, "All")), [1, 2, 3, 4, 5])
+})
+
 test("catalogRecords uses friendly names and skips duplicates", () => {
   const rows = [
     { entry: { id: "org.gnome.Nautilus.desktop", name: "Nautilus", icon: "org.gnome.Nautilus" } },

@@ -395,6 +395,26 @@ function workspaceById(workspaces, id) {
   return null
 }
 
+// Keep the bar compact by default: show the focused workspace and every
+// occupied workspace.  "all" mirrors the launcher's configured workspace
+// count for people who use the bar as a complete workspace map.
+function workspaceBarIds(count, workspaces, focusedId, mode) {
+  var ids = workspaceIds(count)
+  var visibility = String(mode || "").toLowerCase()
+  if (visibility.indexOf("all") === 0) return ids
+
+  var visible = []
+  var focused = Math.trunc(Number(focusedId))
+  for (var i = 0; i < ids.length; i++) {
+    var id = ids[i]
+    var stockMinimum = visibility.indexOf("first five") === 0 && id <= 5
+    if (stockMinimum || id === focused || workspaceOccupied(workspaceById(workspaces, id)))
+      visible.push(id)
+  }
+  if (!visible.length) visible.push(ids[0])
+  return visible
+}
+
 function toplevelClass(toplevel) {
   if (!toplevel) return ""
   var ipc = toplevel.lastIpcObject

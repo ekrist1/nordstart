@@ -174,12 +174,40 @@ and lives outside this repo — treat those as an external API surface, not some
   `omarchy-launch-floating-terminal-with-presentation` runs `omarchy theme install` or
   `omarchy plugin add` — same rule as the store, never clone or enable from here.
   Install URLs live as constants in `NordstartModel.js` (`companionInstallCommand`).
-- **`BarWidget.qml`** — the small bar-icon entry point. Lazily loads `Panel.qml` via a `Loader`,
-  wires up the `IpcHandler` (`omarchy-shell shell toggle io.github.ekrist1.nordstart`, plus
-  open/close/show/hide), hover-to-open behavior, and the bar's click-target/tooltip registration
-  contract.
-- **`manifest.json`** — plugin metadata and the settings schema (`hoverOpen`,
-  `showWorkspacePreview`, `workspaceCount`, `pinnedApps`, `appNames`, `appAliases`,
+- **`BarWidget.qml`** — replaces the stock workspace widget through `clonedFrom`, renders compact
+  workspace-number/app-icon pills, and owns their hover window list / optional live preview. It
+  also keeps the 3×3 launcher entry point, lazily loads `Panel.qml` via a `Loader`, wires up the
+  `IpcHandler` (`omarchy-shell shell toggle io.github.ekrist1.nordstart`, plus open/close/show/hide),
+  and preserves the bar's click-target/tooltip registration contract.
+
+  Four constraints on the hover preview, each of which shipped as a bug:
+
+  1. **The card grows but never shrinks while open.** A popup cannot commit a new position and a
+     new size in the same frame, so resizing one mid-sweep shows a frame where the two disagree —
+     the card lands over the pills, or leaves a gap. The bottom edge is pinned just above the bar,
+     so growing extends it upward, away from the pointer, and is safe; shrinking is what flickers.
+     `previewRowsFloor` is the session high-water mark, cleared on the next open — i.e. once the
+     pointer has left the strip.
+  2. **`anchorItem` is the widget, never the hovered pill.** Re-anchoring per pill repositions a
+     live popup surface on every crossing. The card is about as wide as the strip and is clamped
+     to the screen edge anyway, so per-pill anchoring bought no real precision.
+  3. **The preview passes no `owner`.** `Panel.qml` already claims the BarWidget as its popout key
+     (`owner: root.barIdentity`), so sharing it meant closing the preview called `releasePopout`
+     on the key the launcher panel was holding — and made the bar paint the module's open-panel
+     indicator, which `Bar.qml` centres on the whole slot, so it appeared under an unrelated pill.
+  4. **An exit must not cancel a pending open.** Qt does not guarantee that pill A's exit is
+     delivered before pill B's enter, so `schedulePreviewClose()` deliberately leaves
+     `previewOpenTimer` running; the open timer re-checks that its pill is still hovered, and the
+     close timer decides from live hover state (`previewShouldStayOpen`) rather than trusting the
+     event that armed it.
+
+  Also note `triggerPress()` on the launcher button is required, not optional: `Bar.qml`'s
+  `moduleTargetClickable()` rejects any registered click target without it, which silently makes
+  `registerClickTarget` a no-op.
+- **`manifest.json`** — plugin metadata, the `omarchy.workspaces` clone declaration, and the
+  settings schema (`hoverOpen`, `workspaceBarStyle`, `workspaceBarVisibility`,
+  `workspaceHoverPreview`, `workspaceIconStyle`, `showLauncherButton`, `showWorkspacePreview`, `workspaceCount`,
+  `pinnedApps`, `appNames`, `appAliases`,
   `appStoreEnabled`, `appStoreSearchAur`, `launchWorkspace`, `pluginUpdateCheck`,
   `workspaceNames`, `moveFollowsWindow`, `showScratchpad`). Note `barWidget.defaults` and `barWidget.schema[].defaultValue`
   duplicate each other — a new setting has to be added to both. Keep this in
