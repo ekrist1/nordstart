@@ -182,15 +182,32 @@ and lives outside this repo — treat those as an external API surface, not some
 
   Four constraints on the hover preview, each of which shipped as a bug:
 
-  1. **The card grows but never shrinks while open.** A popup cannot commit a new position and a
-     new size in the same frame, so resizing one mid-sweep shows a frame where the two disagree —
-     the card lands over the pills, or leaves a gap. The bottom edge is pinned just above the bar,
-     so growing extends it upward, away from the pointer, and is safe; shrinking is what flickers.
-     `previewRowsFloor` is the session high-water mark, cleared on the next open — i.e. once the
-     pointer has left the strip.
-  2. **`anchorItem` is the widget, never the hovered pill.** Re-anchoring per pill repositions a
-     live popup surface on every crossing. The card is about as wide as the strip and is clamped
-     to the screen edge anyway, so per-pill anchoring bought no real precision.
+  1. **The popup window never changes size; the card inside it does.** Resizing a mapped popup is
+     what tore: the surface size and the popup position are separate commits, so one frame shows
+     them disagreeing — the card landing over the pills, or a gap below it. So the preview is built
+     on `PopupWindow` rather than `PopupCard`: the window is frozen at `previewMaxWindows` (the
+     busiest workspace on the bar), fully transparent, with `mask: Region { item: card }` so the
+     oversized transparent area does not swallow clicks. The `BorderSurface` card inside is sized
+     from `previewContent.implicitHeight` and pinned to the edge nearest the bar, so it grows and
+     shrinks freely within one frame.
+
+     Two traps in that card: `previewContent` takes `width: parent.width` and **never**
+     `anchors.fill`, because the card's height derives from the layout's `implicitHeight` and
+     filling the card would make the two define each other; and the card is positioned with `y`
+     rather than `anchors.top`/`anchors.bottom`, because mixing an explicit height with anchors
+     left the height binding frozen at its first value.
+
+  2. **Placement differs by bar orientation.** `anchorItem` is the widget, never the hovered pill:
+     re-anchoring per pill repositions a live popup surface on every crossing. On a *horizontal*
+     bar that costs nothing, because the card is about as wide as the pill strip and gets clamped
+     to the screen edge anyway. On a *vertical* bar the pills are stacked, so `onAnchoring` places
+     the card beside the hovered pill instead — centring on the strip would park it next to an
+     unrelated workspace, or below the strip entirely. Since `anchorItem` does not change, nothing
+     tells Quickshell to re-place the window, so a `Connections` on `previewAnchorChanged` calls
+     `anchor.updateAnchor()` (vertical only). When the window clamps at a screen edge,
+     `verticalOverflow` slides the card the other way inside the larger window so it stays level
+     with its pill.
+
   3. **The preview passes no `owner`.** `Panel.qml` already claims the BarWidget as its popout key
      (`owner: root.barIdentity`), so sharing it meant closing the preview called `releasePopout`
      on the key the launcher panel was holding — and made the bar paint the module's open-panel

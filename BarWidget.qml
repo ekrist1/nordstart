@@ -59,17 +59,21 @@ BarWidget {
   readonly property bool previewShouldStayOpen: root.hoveredWorkspaceId > 0 || workspacePreview.containsMouse
   // One row unit: a window row plus the gap above it.
   readonly property int previewRowUnit: Style.space(42) + Style.spacing.sm
-  // High-water mark for this hover session. A live popup cannot commit a new
-  // position and a new size in the same frame, so resizing one mid-sweep shows
-  // a frame where the two disagree -- the card lands over the pills, or leaves
-  // a gap. Growing is the safe direction (the bottom edge is pinned just above
-  // the bar, so the card extends upward, away from the pointer); shrinking is
-  // the one that flickers. So the card grows to fit a busier workspace but
-  // never shrinks while it is open, and the mark is cleared on the next open
-  // -- i.e. once the pointer has left the strip.
-  property int previewRowsFloor: 0
-  readonly property int previewRows: Math.max(root.previewRowsFloor,
-                                              Math.max(1, root.previewWindows.length))
+  // Sizes the popup *window*, which stays frozen while the pointer crosses
+  // pills; the card inside it sizes to whichever workspace is hovered. It only
+  // moves when a window is actually opened or closed.
+  readonly property int previewMaxWindows: {
+    var _ = Hyprland.workspaces.values
+    var __ = Hyprland.activeToplevel
+    var ids = root.visibleWorkspaceIds
+    var most = 1
+    for (var i = 0; i < ids.length; i++) {
+      var ws = Model.workspaceById(Hyprland.workspaces, ids[i])
+      var count = ws && ws.toplevels && ws.toplevels.values ? ws.toplevels.values.length : 0
+      if (count > most) most = count
+    }
+    return most
+  }
   readonly property bool monochromeWorkspaceIcons: workspaceIconStyle.toLowerCase().indexOf("mono") >= 0
 
   implicitWidth: barLayout.implicitWidth
@@ -144,12 +148,8 @@ BarWidget {
     // a flicker. Nothing to do when the pointer is back on the pill already
     // being shown.
     if (workspacePreview.open && previewWorkspaceId === id && previewAnchor === anchor) return
-    // Opening fresh, so the pointer has been away from the strip: forget the
-    // previous session's height and size to this workspace.
-    if (!workspacePreview.open) root.previewRowsFloor = 0
     previewWorkspaceId = id
     previewAnchor = anchor
-    root.previewRowsFloor = root.previewRows
     workspacePreview.open = true
   }
 
@@ -480,37 +480,172 @@ BarWidget {
     onTriggered: if (!root.previewShouldStayOpen) workspacePreview.open = false
   }
 
-  PopupCard {
+  // Built on PopupWindow rather than PopupCard because the window must keep a
+  // constant size. Resizing a mapped popup is what tore: the surface size and
+  // the popup position are separate commits, so one frame shows them
+  // disagreeing -- the card landing over the pills, or a gap below it.
+  //
+  // So the *window* is frozen (sized for the busiest workspace on the bar, and
+  // fully transparent) while the *card* inside it resizes freely to whichever
+  // workspace is hovered. Repainting a smaller card inside an unchanged window
+  // happens within one frame, so growing and shrinking are both clean. Input
+  // is masked to the card so the oversized transparent window does not swallow
+  // clicks meant for what is behind it.
+  PopupWindow {
     id: workspacePreview
-    // Anchored to the widget, not to the hovered pill. Re-anchoring to each
-    // pill repositions a live popup surface on every crossing, which is what
-    // tears when the card is also resizing (a workspace with more windows).
-    // The card is about as wide as the pill strip and gets clamped to the
-    // screen edge anyway, so per-pill anchoring bought almost no precision.
-    anchorItem: root
-    bar: root.bar
-    // No `owner`, on purpose: that leaves the popout key as this card rather
-    // than the BarWidget, which the launcher panel already claims
-    // (Panel.qml: owner: root.barIdentity). Sharing the key meant closing the
-    // preview released the panel's claim, and made the bar light the module's
-    // open-panel indicator -- which is centred on the whole widget, so it
-    // appeared under an unrelated pill.
-    triggerMode: "hover"
-    contentWidth: fittedContentWidth(Style.space(300), Style.space(420))
-    contentHeight: fittedContentHeight(previewContent.implicitHeight, Style.space(440))
+
+    property bool open: false
+    readonly property bool containsMouse: cardHover.hovered
+    readonly property var anchorWindow: root.QsWindow.window
+    readonly property var popupScreen: anchorWindow ? anchorWindow.screen : null
+    readonly property int margin: Style.gapsOut
+    readonly property int padding: Style.spacing.popupPadding
+    readonly property var borderSpec: Border.localOrSurfaceSpec("popups", "border",
+                                                                Color.popups.border, Color.popups.border,
+                                                                Math.max(1, Style.space(2)))
+    readonly property bool barAtBottom: !!(root.bar && root.bar.position === "bottom")
+    // How far the window had to be pushed back on screen to stay visible. The
+    // card slides the opposite way inside the (larger) window to stay level
+    // with its pill.
+    property real verticalOverflow: 0
+    readonly property int verticalInset: padding * 2 + Border.top(borderSpec) + Border.bottom(borderSpec)
+
+    readonly property int cardWidth: {
+      var screenW = popupScreen ? popupScreen.width : 0
+      // A vertical bar sits beside the card, so it eats into the width.
+      var barW = root.vertical && anchorWindow ? anchorWindow.width : 0
+      var avail = screenW > 0 ? screenW - barW - margin * 2 : Style.space(300)
+      return Math.round(Math.min(Style.space(300), Math.min(avail, Style.space(420))))
+    }
+    readonly property int windowHeight: {
+      var screenH = popupScreen ? popupScreen.height : 0
+      var avail = screenH > 0 ? screenH - margin * 2 : Style.space(440)
+      var wanted = root.previewRowUnit * root.previewMaxWindows
+        + previewHeader.implicitHeight + previewContent.spacing
+        + (root.livePreview ? Style.space(150) + previewContent.spacing : 0)
+        + verticalInset
+      return Math.round(Math.min(wanted, Math.min(avail, Style.space(440))))
+    }
+
+    visible: open || card.opacity > 0
+    color: "transparent"
+    implicitWidth: cardWidth
+    implicitHeight: windowHeight
+    mask: Region { item: card }
+
+    anchor {
+      id: previewAnchorSpec
+      window: workspacePreview.anchorWindow
+      adjustment: PopupAdjustment.Slide
+      edges: Edges.Top | Edges.Left
+      gravity: Edges.Bottom | Edges.Right
+      rect.width: 1
+      rect.height: 1
+
+      // The same placement PopupCard performs, but computed from the frozen
+      // window height, so the rect stays put for the whole hover session.
+      onAnchoring: {
+        var win = workspacePreview.anchorWindow
+        if (!win || !root.bar) return
+        var w = workspacePreview.implicitWidth
+        var h = workspacePreview.implicitHeight
+        var m = workspacePreview.margin
+        var localX
+        var localY
+
+        if (root.vertical) {
+          // On a vertical bar the pills are stacked, so the card has to sit
+          // beside the one being hovered -- centring on the whole strip would
+          // park it next to an unrelated workspace, or below the strip
+          // entirely. Horizontal bars stay centred on the widget: the card is
+          // about as wide as the strip there, so tracking each pill would
+          // reposition the window on every crossing for no visible gain.
+          var pill = root.previewAnchor
+          var pillY = 0
+          var pillH = root.height
+          if (pill && pill !== root) {
+            pillY = pill.mapToItem(root, 0, 0).y
+            pillH = pill.height
+          }
+          localX = root.bar.position === "right" ? (-w - m) : (root.width + m)
+          localY = pillY + pillH / 2 - h / 2
+        } else {
+          localX = root.width / 2 - w / 2
+          localY = workspacePreview.barAtBottom ? (-h - m) : (root.height + m)
+        }
+
+        var point = win.contentItem.mapFromItem(root, localX, localY)
+        if (root.vertical) {
+          var wanted = point.y
+          point.y = Math.max(m, Math.min(point.y, win.height - h - m))
+          workspacePreview.verticalOverflow = wanted - point.y
+        } else {
+          point.x = Math.max(m, Math.min(point.x, win.width - w - m))
+        }
+        previewAnchorSpec.rect.x = Math.round(point.x)
+        previewAnchorSpec.rect.y = Math.round(point.y)
+      }
+    }
 
     onContainsMouseChanged: {
       if (containsMouse) previewCloseTimer.stop()
       else root.schedulePreviewClose()
     }
 
+    // anchorItem is the widget, not the pill, so nothing tells Quickshell to
+    // re-place the window when the pointer moves to another pill. Only needed
+    // on a vertical bar, where the placement depends on which pill it is.
+    Connections {
+      target: root
+      enabled: root.vertical
+      function onPreviewAnchorChanged() {
+        if (workspacePreview.open) workspacePreview.anchor.updateAnchor()
+      }
+    }
 
-    ColumnLayout {
-      id: previewContent
-      anchors.fill: parent
-      spacing: Style.spacing.sm
+    BorderSurface {
+      id: card
+      width: workspacePreview.cardWidth
+      // Sized to the hovered workspace, free to grow and shrink. Expressed
+      // against the window's own frozen height rather than `parent`, and
+      // positioned with y rather than anchors: mixing an explicit height with
+      // anchors here left the height binding frozen at its first value.
+      height: Math.min(workspacePreview.windowHeight,
+                       Math.round(previewContent.implicitHeight) + workspacePreview.verticalInset)
+      // Pinned to the edge nearest the bar, so it grows away from the pointer.
+      y: root.vertical
+        ? Math.round(Math.max(0, Math.min(workspacePreview.windowHeight - height,
+            (workspacePreview.windowHeight - height) / 2 + workspacePreview.verticalOverflow)))
+        : (workspacePreview.barAtBottom ? (workspacePreview.windowHeight - height) : 0)
+      color: Color.popups.background
+      borderSpec: workspacePreview.borderSpec
+      padding: workspacePreview.padding
+      radius: Style.cornerRadius
+      opacity: workspacePreview.open ? 1.0 : 0
+
+      Behavior on opacity {
+        NumberAnimation { duration: 140; easing.type: Easing.OutCubic }
+      }
+
+      HoverHandler { id: cardHover }
+
+      Item {
+        anchors.fill: parent
+        anchors.topMargin: card.contentTopInset
+        anchors.rightMargin: card.contentRightInset
+        anchors.bottomMargin: card.contentBottomInset
+        anchors.leftMargin: card.contentLeftInset
+
+        ColumnLayout {
+          id: previewContent
+          // Width only, never anchors.fill: the card's height is derived from
+          // this layout's implicitHeight, so filling the card would make the
+          // two define each other and QML would freeze the height.
+          width: parent.width
+          spacing: Style.spacing.sm
 
       RowLayout {
+        id: previewHeader
         Layout.fillWidth: true
 
         Text {
@@ -638,15 +773,7 @@ BarWidget {
           }
         }
       }
-
-      // Holds the card at this session's high-water mark, so stepping onto a
-      // quieter workspace leaves empty space rather than shrinking a live
-      // popup. An empty workspace counts as one row, because the
-      // "No windows open" label above is sized as one.
-      Item {
-        Layout.fillWidth: true
-        Layout.preferredHeight: Math.max(0,
-          (root.previewRows - Math.max(1, root.previewWindows.length)) * root.previewRowUnit)
+        }
       }
     }
   }

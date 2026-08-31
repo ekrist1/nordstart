@@ -99,8 +99,8 @@
         "key": "hoverOpen",
         "type": "boolean",
         "label": "Open on hover",
-        "defaultValue": true,
-        "description": "Open the launcher when the pointer rests on the bar icon. Click and the keyboard shortcut still toggle it."
+        "defaultValue": false,
+        "description": "Open the launcher panel when the pointer rests on the grid icon. Off by default: clicking the icon, and the keyboard shortcut, still toggle it."
       },
       {
         "key": "showWorkspacePreview",
