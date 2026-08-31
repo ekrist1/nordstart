@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.ekrist1.nordstart",
   "name": "Nordstart",
-  "version": "1.10.0",
+  "version": "1.11.0",
   "author": "espen",
   "license": "MIT",
   "description": "Workspace launcher with pinned apps, an installed-app search, an app store, session actions, and shortcuts to Nordtema and Nordsettings",
@@ -31,7 +31,10 @@
       "launchWorkspace": "Current workspace",
       "pluginUpdateCheck": "On",
       "appOrder": "Recent first",
-      "appUsage": ""
+      "appUsage": "",
+      "workspaceNames": "",
+      "moveFollowsWindow": false,
+      "showScratchpad": true
     },
     "schema": [
       {
@@ -67,7 +70,7 @@
           "First empty workspace"
         ],
         "defaultValue": "Current workspace",
-        "description": "Where an app opens when you start it from the launcher. 'Current workspace' keeps you where you are, so a second terminal lands beside the first. Press n (or Shift-click) to start another copy of an app that is already running \u2014 that always opens on the current workspace."
+        "description": "Where an app opens when you start it from the launcher. 'Current workspace' keeps you where you are, so a second terminal lands beside the first. Press n (or Shift-click) to start another copy of an app that is already running — that always opens on the current workspace."
       },
       {
         "key": "appOrder",
@@ -132,6 +135,27 @@
         "label": "App usage data",
         "defaultValue": "",
         "description": "Recorded automatically as id:count:timestamp triples, newest-weighted, capped at 60 apps. Clear this to reset the 'Recent first' ordering."
+      },
+      {
+        "key": "workspaceNames",
+        "type": "string",
+        "label": "Workspace names",
+        "defaultValue": "",
+        "description": "Name your workspaces: 1=code,2=web,3=mail. An empty workspace shows its name instead of 'empty'; a busy one shows it beside the running app. The names also label the workspace badges in the window switcher."
+      },
+      {
+        "key": "moveFollowsWindow",
+        "type": "boolean",
+        "label": "Follow moved windows",
+        "defaultValue": false,
+        "description": "After m moves a window to another workspace, switch to that workspace too. Off keeps you where you are, the way launching an app does."
+      },
+      {
+        "key": "showScratchpad",
+        "type": "boolean",
+        "label": "Show scratchpad",
+        "defaultValue": true,
+        "description": "Show Hyprland's scratchpad (its special workspace) under the grid, with what is stashed in it. Press 0 to toggle it."
       }
     ]
   }

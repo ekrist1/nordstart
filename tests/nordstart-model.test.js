@@ -487,3 +487,202 @@ test("rankAppRows puts most-used first, but never outranks a better text match",
 
   assert.equal(Model.rankAppRows(null, {}, NOW, "").length, 0)
 })
+
+// ------------------------------------------------------------------ windows
+
+// A toplevel as Quickshell hands it over: the interesting fields live on
+// lastIpcObject, which is the raw `hyprctl clients` record.
+function win(cls, title, opts) {
+  opts = opts || {}
+  return {
+    title: title || "",
+    address: opts.address || ("0x" + cls),
+    activated: opts.activated === true,
+    workspace: opts.workspace || null,
+    lastIpcObject: {
+      class: cls,
+      title: title || "",
+      address: opts.address || ("0x" + cls),
+      focusHistoryID: opts.focus,
+      floating: opts.floating === true,
+      pinned: opts.pinned === true,
+      workspace: opts.ws || { id: opts.wsId || 1, name: String(opts.wsId || 1) }
+    }
+  }
+}
+
+const winEntries = {
+  byId: function(id) {
+    if (id === "firefox" || id === "firefox.desktop") return { id: "firefox", name: "Firefox", icon: "firefox" }
+    if (id === "code" || id === "code.desktop") return { id: "code", name: "Visual Studio Code", icon: "code" }
+    return null
+  },
+  heuristicLookup: function() { return null }
+}
+
+test("focus rank reads focusHistoryID, and treats 0 as most recent", () => {
+  assert.equal(Model.toplevelFocusRank(win("firefox", "a", { focus: 0 })), 0)
+  assert.equal(Model.toplevelFocusRank(win("firefox", "a", { focus: 4 })), 4)
+  // No history at all must sort last, not first.
+  assert.ok(Model.toplevelFocusRank(win("firefox", "a", {})) > 1000)
+  assert.ok(Model.toplevelFocusRank(null) > 1000)
+})
+
+test("windowRows orders by MRU and labels the workspace", () => {
+  const tops = [
+    win("code", "one.qml", { focus: 3, wsId: 1, address: "0xa" }),
+    win("firefox", "Home", { focus: 0, wsId: 2, address: "0xb" }),
+    win("code", "two.qml", { focus: 2, wsId: 1, address: "0xc" })
+  ]
+  const rows = Model.rankWindowRows(Model.windowRows(tops, winEntries, null, null, null), "")
+  assert.equal(rows.map(function(r) { return r.address }).join(","), "0xb,0xc,0xa")
+  assert.equal(rows[0].appName, "Firefox")
+  assert.equal(rows[0].workspaceLabel, "2")
+})
+
+test("windowRows labels a workspace by its user-given name", () => {
+  const tops = [win("firefox", "Home", { focus: 0, wsId: 2 })]
+  const rows = Model.windowRows(tops, winEntries, null, "1=code,2=web", null)
+  assert.equal(rows[0].workspaceLabel, "web")
+})
+
+test("windowRows trusts the ipc workspace over the quickshell one", () => {
+  const top = win("firefox", "Home", { focus: 0, wsId: 7 })
+  top.workspace = { id: 1, name: "1" }
+  const rows = Model.windowRows([top], winEntries, null, null, null)
+  assert.equal(rows[0].workspaceId, 7)
+})
+
+test("windowMruRanks freezes the order it was captured with", () => {
+  const tops = [
+    win("code", "one", { focus: 1, address: "0xa" }),
+    win("firefox", "Home", { focus: 0, address: "0xb" })
+  ]
+  const ranks = Model.windowMruRanks(tops)
+  // Hyprland refocuses while the view is open; the frozen ranks must win, or
+  // the list reshuffles under the cursor.
+  tops[0].lastIpcObject.focusHistoryID = 0
+  tops[1].lastIpcObject.focusHistoryID = 1
+  const rows = Model.rankWindowRows(Model.windowRows(tops, winEntries, null, null, ranks), "")
+  assert.equal(rows.map(function(r) { return r.address }).join(","), "0xb,0xa")
+})
+
+test("matchesWindowQuery ANDs its terms across title, app and class", () => {
+  const row = Model.windowRows([win("code", "SettingsBackend.qml", { focus: 0, wsId: 3 })], winEntries, null, null, null)[0]
+  assert.equal(Model.matchesWindowQuery(row, "settings"), true)
+  assert.equal(Model.matchesWindowQuery(row, "code settings"), true)
+  assert.equal(Model.matchesWindowQuery(row, "SETTINGS"), true)
+  assert.equal(Model.matchesWindowQuery(row, "settings firefox"), false)
+  assert.equal(Model.matchesWindowQuery(row, ""), true)
+})
+
+test("a better text match outranks a more recent window", () => {
+  const tops = [
+    win("firefox", "Home", { focus: 0, address: "0xb" }),
+    win("code", "settings.qml", { focus: 9, address: "0xa" })
+  ]
+  const rows = Model.rankWindowRows(Model.windowRows(tops, winEntries, null, null, null), "settings")
+  // 0xa is far staler but matches; recency must not drag 0xb back in.
+  assert.equal(rows.length, 1)
+  assert.equal(rows[0].address, "0xa")
+})
+
+test("windowHint names the live move key, without repeating the badge", () => {
+  const row = Model.windowRows([win("firefox", "Home", { focus: 0, wsId: 4 })], winEntries, null, null, null)[0]
+  assert.ok(Model.windowHint(row, false).indexOf(" m move") >= 0)
+  assert.ok(Model.windowHint(row, true).indexOf("^m move") >= 0)
+  // The workspace badge renders right beside the hint, so repeating it here
+  // just says the same thing twice.
+  assert.equal(Model.windowHint(row, false).indexOf("workspace"), -1)
+})
+
+test("searchPlaceholder covers every view", () => {
+  assert.equal(Model.searchPlaceholder("store"), "search apps and packages...")
+  assert.equal(Model.searchPlaceholder("windows"), "search windows...")
+  assert.equal(Model.searchPlaceholder("apps"), "search apps...")
+  assert.equal(Model.searchPlaceholder("workspaces"), "search apps...")
+})
+
+// ------------------------------------------------------------- move window
+
+test("moveWindowDispatch builds both hyprland syntaxes", () => {
+  assert.equal(Model.moveWindowDispatch("3", false, true), 'hl.dsp.window.move({ workspace = "3", follow = false })')
+  assert.equal(Model.moveWindowDispatch("3", true, true), 'hl.dsp.window.move({ workspace = "3" })')
+  assert.equal(Model.moveWindowDispatch("3", false, false), "movetoworkspacesilent 3")
+  assert.equal(Model.moveWindowDispatch("3", true, false), "movetoworkspace 3")
+  assert.ok(Model.moveWindowDispatch("special:scratchpad", false, false).indexOf("special:scratchpad") > 0)
+})
+
+test("moveWindowDispatch refuses anything that is not a workspace", () => {
+  // A dispatch is fire-and-forget, so a bad target fails silently in the
+  // compositor. Refusing here is the only place it can be caught.
+  assert.equal(Model.moveWindowDispatch("3; rm -rf /", false, false), "")
+  assert.equal(Model.moveWindowDispatch("0", false, false), "")
+  assert.equal(Model.moveWindowDispatch("10", false, false), "")
+  assert.equal(Model.moveWindowDispatch("", false, false), "")
+  assert.equal(Model.moveWindowDispatch("special:has spaces", false, false), "")
+})
+
+test("toggleSpecialDispatch builds both syntaxes and refuses junk", () => {
+  assert.equal(Model.toggleSpecialDispatch("scratchpad", true), 'hl.dsp.workspace.toggle_special("scratchpad")')
+  assert.equal(Model.toggleSpecialDispatch("scratchpad", false), "togglespecialworkspace scratchpad")
+  assert.equal(Model.toggleSpecialDispatch("bad name", false), "")
+  assert.equal(Model.toggleSpecialDispatch("", false), "")
+})
+
+// -------------------------------------------------------------- scratchpad
+
+test("specialWorkspaceRows picks up only the scratchpad's windows", () => {
+  const tops = [
+    win("firefox", "Home", { focus: 0, ws: { id: 2, name: "2" } }),
+    win("code", "one.qml", { focus: 1, address: "0xs", ws: { id: -99, name: "special:scratchpad" } }),
+    win("firefox", "Other", { focus: 2, address: "0xm", ws: { id: -98, name: "special:magic" } })
+  ]
+  const info = Model.specialWorkspaceRows(tops, winEntries, null, "scratchpad")
+  assert.equal(info.count, 1)
+  assert.equal(info.apps.join(","), "Code")
+  assert.equal(info.addresses.join(","), "0xs")
+})
+
+test("scratchpadLabel summarises what is stashed", () => {
+  assert.equal(Model.scratchpadLabel({ count: 0, apps: [] }), "empty")
+  assert.equal(Model.scratchpadLabel(null), "empty")
+  assert.equal(Model.scratchpadLabel({ count: 1, apps: ["Terminal"] }), "Terminal")
+  assert.equal(Model.scratchpadLabel({ count: 3, apps: ["Terminal", "Firefox", "Code"] }), "Terminal +2")
+})
+
+test("the scratchpad chip is reachable below the grid, and only when it exists", () => {
+  // Bottom-left cell of a 9-workspace grid, pressing down.
+  const down = Model.moveCursor("workspaces", 7, 0, 0, 1, 9, 3, true)
+  assert.equal(down.section, "scratchpad")
+  const back = Model.moveCursor("scratchpad", 7, 0, 0, -1, 9, 3, true)
+  assert.equal(back.section, "workspaces")
+  const toPinned = Model.moveCursor("scratchpad", 7, 0, 1, 0, 9, 3, true)
+  assert.equal(toPinned.section, "pinned")
+  // Without a scratchpad the old behaviour has to be exactly preserved.
+  const clamped = Model.moveCursor("workspaces", 7, 0, 0, 1, 9, 3, false)
+  assert.equal(clamped.section, "workspaces")
+  assert.equal(clamped.workspaceId, 7)
+})
+
+// --------------------------------------------------------- workspace names
+
+test("workspaceName reads the shared id=name grammar", () => {
+  assert.equal(Model.workspaceName("1=code,2=web", 1), "code")
+  assert.equal(Model.workspaceName("1=code, 2 = web", 2), "web")
+  assert.equal(Model.workspaceName("1=code", 3), "")
+  assert.equal(Model.workspaceName("", 1), "")
+  assert.equal(Model.workspaceName('{"3":"mail"}', 3), "mail")
+})
+
+test("a named workspace keeps its name when empty and beside the app when busy", () => {
+  const empty = Model.workspacePresentation(workspace(2, []), winEntries, null, "web")
+  assert.equal(empty.name, "web")
+  assert.equal(empty.occupied, false)
+  // Unnamed must still read "empty" — that is the pre-existing behaviour.
+  assert.equal(Model.workspacePresentation(workspace(2, []), winEntries, null, "").name, "empty")
+
+  const busy = Model.workspacePresentation(workspace(1, [win("firefox", "Home", { focus: 0 })]), winEntries, null, "web")
+  assert.equal(busy.name, "Firefox")
+  assert.equal(busy.workspaceName, "web")
+})

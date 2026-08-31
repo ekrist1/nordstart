@@ -117,6 +117,9 @@ function packagesFromWhen(when) {
   return out
 }
 
+// One-part install leaves that are genuine actions rather than pickers.
+var META_ALLOWLIST = { webapp: { label: "Web apps" } }
+
 // Pairs install.<leaf> with remove.<leaf>. The ids are symmetric wherever a
 // remove row exists, so the leaf is the join key and also the stable row id.
 function storeCatalog(defaultItems, userItems) {
@@ -145,8 +148,34 @@ function storeCatalog(defaultItems, userItems) {
     var leaf = item.id.slice(INSTALL_PREFIX.length)
     var parts = leaf.split(".")
     // Top-level install actions are the fzf pickers and meta-installers
-    // (package, aur, webapp, tui, windows, preinstalls), not apps.
-    if (parts.length < 2) continue
+    // (package, aur, tui, windows, preinstalls), not apps — with one exception.
+    // `webapp` is a real user action rather than a route into a picker list, so
+    // it is allowed through and rendered as its own section.
+    if (parts.length < 2) {
+      if (!META_ALLOWLIST[leaf]) continue
+      var metaRemoval = byId[REMOVE_PREFIX + leaf]
+      records.push({
+        key: leaf,
+        id: item.id,
+        label: item.label,
+        icon: item.icon,
+        iconFont: item.iconFont,
+        meta: leaf,
+        category: leaf,
+        categoryLabel: META_ALLOWLIST[leaf].label,
+        // After every real category (which numbers from 0) but before the
+        // 999 fallback: "new web app" is an action you go looking for, not
+        // the headline the store should open with.
+        categoryOrder: 998,
+        installAction: item.action,
+        installWhen: item.when,
+        removeAction: metaRemoval ? metaRemoval.action : "",
+        removeWhen: metaRemoval ? metaRemoval.when : "",
+        // Empty, so this never suppresses a raw package of the same name.
+        packages: []
+      })
+      continue
+    }
 
     var category = parts[0]
     if (EXCLUDED_CATEGORIES[category]) continue
@@ -369,6 +398,45 @@ function storeRows(records, guards, pkgRows, opts) {
     if (rec.category !== lastCategory) {
       rows.push({ kind: "header", key: "hdr:" + rec.category, label: rec.categoryLabel, selectable: false })
       lastCategory = rec.category
+    }
+
+    // A meta action is not one thing in two states: "add another web app" and
+    // "remove one of them" are independent, so it emits two rows. The remove
+    // row is gated on the catalog's own `when:`, which is false when no web
+    // app is installed.
+    if (rec.meta) {
+      rows.push({
+        kind: rec.meta + "-add",
+        key: rec.meta + ":add",
+        label: "New " + rec.label.toLowerCase() + "…",
+        icon: rec.icon,
+        iconFont: rec.iconFont,
+        detail: rec.categoryLabel,
+        // `state` stays "available" so activateStoreRow does not skip the row
+        // as already-installed; actionLabel is what the cell actually reads,
+        // since "install" is the wrong word for either of these.
+        state: "available",
+        actionLabel: "create",
+        record: rec,
+        selectable: true
+      })
+      if (rec.removeAction && storeState(rec, guards) === "installed") {
+        rows.push({
+          kind: rec.meta + "-remove",
+          key: rec.meta + ":remove",
+          label: "Remove " + rec.label.toLowerCase() + "…",
+          icon: rec.icon,
+          iconFont: rec.iconFont,
+          detail: rec.categoryLabel,
+          state: "available",
+          actionLabel: "remove",
+          record: rec,
+          selectable: true
+        })
+      }
+      // Deliberately not counted: appCount means "apps that matched", and an
+      // action row is not an app.
+      continue
     }
 
     rows.push({
@@ -643,6 +711,19 @@ function storeCommand(row, kind) {
     return rec.installAction ? { mode: "shell", command: rec.installAction } : null
   }
 
+  // The install action already carries the terminal wrapper, but the catalog's
+  // remove action is the bare `omarchy-webapp-remove` — a gum picker that does
+  // nothing without a TTY. So it is wrapped here rather than passed through as
+  // a trusted shell string the way an app's removeAction is.
+  if (row.kind === "webapp-add") {
+    var addAction = row.record && row.record.installAction
+    return addAction
+      ? { mode: "shell", command: addAction }
+      : { mode: "argv", argv: [TERMINAL_WRAPPER, "omarchy-webapp-install"] }
+  }
+  if (row.kind === "webapp-remove")
+    return { mode: "argv", argv: [TERMINAL_WRAPPER, "omarchy-webapp-remove"] }
+
   if (row.kind === "plugin") {
     // Only a repo that has actually moved is actionable; a local checkout or a
     // failed check has nothing to apply.
@@ -672,6 +753,9 @@ function storeCommand(row, kind) {
 function storeCanUninstall(row) {
   if (!row) return false
   if (row.kind === "plugin") return false
+  // Both web-app rows act on Enter; `x` must not hijack them, and the removal
+  // script runs its own picker and confirmation.
+  if (row.kind === "webapp-add" || row.kind === "webapp-remove") return false
   if (row.kind === "app") return !!(row.record && row.record.removeAction) && row.state === "installed"
   if (row.kind === "package") return row.state === "installed" && isSafePackageName(row.name)
   return false

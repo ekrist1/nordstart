@@ -525,18 +525,32 @@ function shortAppName(name, cls, userNames) {
   return label
 }
 
-function workspaceAppName(workspace, desktopEntries, userNames) {
-  return workspacePresentation(workspace, desktopEntries, userNames).name
+function workspaceAppName(workspace, desktopEntries, userNames, wsName) {
+  return workspacePresentation(workspace, desktopEntries, userNames, wsName).name
 }
 
-function workspaceSubtitle(workspace, desktopEntries, userNames) {
-  return workspacePresentation(workspace, desktopEntries, userNames).subtitle
+function workspaceSubtitle(workspace, desktopEntries, userNames, wsName) {
+  return workspacePresentation(workspace, desktopEntries, userNames, wsName).subtitle
 }
 
-function workspacePresentation(workspace, desktopEntries, userNames) {
+// `workspaceNames` uses the same `1=code,2=web` grammar as `appNames`, so it
+// reuses parseNameMap outright — stripDesktop("1") is "1" and lowercasing a
+// digit is a no-op, which is why no separate parser is needed.
+function workspaceName(workspaceNames, id) {
+  var map = parseNameMap(workspaceNames)
+  var value = map[String(id)]
+  return value ? String(value) : ""
+}
+
+// `wsName` is optional and last so the existing three-argument callers (and
+// their tests) keep working unchanged.
+function workspacePresentation(workspace, desktopEntries, userNames, wsName) {
   userNames = parseNameMap(userNames)
+  var label = String(wsName || "")
   var toplevel = primaryToplevel(workspace)
-  if (!toplevel) return { name: "empty", subtitle: "", occupied: false }
+  // A named but empty workspace shows its name instead of "empty", so the grid
+  // stays a map of intent even when nothing is running on it.
+  if (!toplevel) return { name: label || "empty", subtitle: "", occupied: false, workspaceName: label }
 
   var cls = toplevelClass(toplevel)
   var entry = lookupEntry(cls, desktopEntries)
@@ -551,10 +565,13 @@ function workspacePresentation(workspace, desktopEntries, userNames) {
     subtitle = terminalSubtitle(toplevelTitle(toplevel), name, cls, entry ? entry.name : "")
   }
 
+  // The name goes in its own field, never folded into `subtitle` — that slot
+  // already carries a terminal's cwd, and naming a workspace must not hide it.
   return {
     name: name,
     subtitle: subtitle ? subtitle.slice(0, 42) : "",
-    occupied: true
+    occupied: true,
+    workspaceName: label
   }
 }
 
@@ -849,6 +866,9 @@ function pinnedApps(rawSetting, desktopEntries, workspaces, userNames, userAlias
 }
 
 function cursorIndex(section, workspaceId, pinnedIndex, workspaceCount, pinnedCount) {
+  if (section === "scratchpad") {
+    return { section: "scratchpad", workspaceId: workspaceId, pinnedIndex: pinnedIndex }
+  }
   if (section === "pinned") {
     if (pinnedCount <= 0) return { section: "workspaces", workspaceId: workspaceId, pinnedIndex: 0 }
     var idx = Math.max(0, Math.min(pinnedCount - 1, pinnedIndex))
@@ -952,6 +972,275 @@ function moveAppCursor(index, delta, count) {
   if (next < 0) return 0
   if (next > count - 1) return count - 1
   return next
+}
+
+// ------------------------------------------------------------------ windows
+//
+// The window switcher works one level below the app list: every open window,
+// not every installed app. Hyprland's `focusHistoryID` (0 = the focused window,
+// 1 = the one before it) is the only true MRU source, and it lives on
+// `lastIpcObject` — the raw `hyprctl clients` record Quickshell hangs off each
+// toplevel.
+
+var SPECIAL_PREFIX = "special:"
+var SCRATCHPAD_NAME = "scratchpad"
+// Sorts a window with no focus history after every window that has one.
+var NO_FOCUS_RANK = 1e9
+
+function toplevelList(toplevels) {
+  if (!toplevels) return []
+  if (Array.isArray(toplevels)) return toplevels
+  if (toplevels.values) return toplevels.values
+  return []
+}
+
+// Careful: focusHistoryID of 0 is the *most* recent window, so a falsy check
+// would throw away exactly the entry that matters most.
+function toplevelFocusRank(toplevel) {
+  if (!toplevel) return NO_FOCUS_RANK
+  var ipc = toplevel.lastIpcObject
+  if (!ipc) return NO_FOCUS_RANK
+  var raw = ipc.focusHistoryID
+  if (raw === null || raw === undefined || raw === "") return NO_FOCUS_RANK
+  var value = Number(raw)
+  return isNaN(value) || value < 0 ? NO_FOCUS_RANK : value
+}
+
+function toplevelAddress(toplevel) {
+  if (!toplevel) return ""
+  if (toplevel.address) return String(toplevel.address)
+  var ipc = toplevel.lastIpcObject
+  return ipc && ipc.address ? String(ipc.address) : ""
+}
+
+// The ipc object is authoritative: `toplevel.workspace` is the Quickshell
+// workspace model, which does not necessarily carry special workspaces, while
+// `hyprctl clients` always names the workspace a window actually sits on.
+function toplevelWorkspace(toplevel) {
+  var idle = { id: 0, name: "" }
+  if (!toplevel) return idle
+  var ipc = toplevel.lastIpcObject
+  if (ipc && ipc.workspace && (ipc.workspace.id !== undefined || ipc.workspace.name !== undefined)) {
+    return {
+      id: Number(ipc.workspace.id) || 0,
+      name: String(ipc.workspace.name || "")
+    }
+  }
+  var ws = toplevel.workspace
+  if (ws) return { id: Number(ws.id) || 0, name: String(ws.name || "") }
+  return idle
+}
+
+function isSpecialWorkspace(name) {
+  return String(name || "").indexOf(SPECIAL_PREFIX) === 0
+}
+
+// Frozen once when the view opens. `refreshToplevels()` is async, so a live
+// binding on focusHistoryID would reshuffle the list under the cursor a beat
+// after you got there.
+function windowMruRanks(toplevels) {
+  var list = toplevelList(toplevels)
+  var ranks = ({})
+  for (var i = 0; i < list.length; i++) {
+    var address = toplevelAddress(list[i])
+    if (address) ranks[address] = toplevelFocusRank(list[i])
+  }
+  return ranks
+}
+
+// One display row per open window. `ranks` comes from windowMruRanks; pass
+// null to read the live focus order instead.
+function windowRows(toplevels, desktopEntries, userNames, workspaceNames, ranks) {
+  var list = toplevelList(toplevels)
+  var names = parseNameMap(userNames)
+  var out = []
+
+  for (var i = 0; i < list.length; i++) {
+    var top = list[i]
+    if (!top) continue
+    var address = toplevelAddress(top)
+    if (!address) continue
+
+    var cls = toplevelClass(top)
+    var entry = lookupEntry(cls, desktopEntries)
+    var appName = shortAppName(entry ? entry.name : "", cls, names)
+    var rawTitle = toplevelTitle(top)
+    var title = cleanWindowTitle(rawTitle, appName, cls)
+    // A terminal's title is its cwd, which is the only thing distinguishing
+    // two of them — the same reasoning as the workspace cells.
+    if (isTerminalClass(cls))
+      title = terminalSubtitle(rawTitle, appName, cls, entry ? entry.name : "")
+    if (!title) title = rawTitle
+    if (!appName) appName = cls || "window"
+
+    var ws = toplevelWorkspace(top)
+    var special = isSpecialWorkspace(ws.name)
+    var named = special ? "" : workspaceName(workspaceNames, ws.id)
+    var ipc = top.lastIpcObject || {}
+    var rank = (ranks && ranks[address] !== undefined) ? Number(ranks[address]) : toplevelFocusRank(top)
+
+    out.push({
+      address: address,
+      cls: cls,
+      appName: appName,
+      title: title ? String(title).slice(0, 60) : "",
+      icon: entry && entry.icon ? entry.icon : "",
+      workspaceId: ws.id,
+      workspaceRawName: ws.name,
+      workspaceLabel: special ? SCRATCHPAD_NAME : (named || String(ws.id)),
+      special: special,
+      activated: !!top.activated,
+      floating: !!ipc.floating,
+      pinned: !!ipc.pinned,
+      rank: rank
+    })
+  }
+  return out
+}
+
+// AND over whitespace-separated terms, the same shape as the store's matcher.
+function matchesWindowQuery(row, query) {
+  if (!row) return false
+  var text = String(query || "").trim().toLowerCase()
+  if (!text) return true
+  var haystack = [row.title, row.appName, row.cls, row.workspaceLabel].join(" ").toLowerCase()
+  var terms = text.split(/\s+/)
+  for (var i = 0; i < terms.length; i++) {
+    if (haystack.indexOf(terms[i]) < 0) return false
+  }
+  return true
+}
+
+// 0 = the term starts the name or title, 1 = it starts a word inside one,
+// 2 = it appears anywhere. Lower is better.
+function windowMatchTier(row, query) {
+  var text = String(query || "").trim().toLowerCase()
+  if (!text) return 0
+  var fields = [String(row.appName || "").toLowerCase(), String(row.title || "").toLowerCase()]
+  for (var i = 0; i < fields.length; i++) {
+    if (fields[i].indexOf(text) === 0) return 0
+  }
+  for (var j = 0; j < fields.length; j++) {
+    if (new RegExp("\\b" + text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).test(fields[j])) return 1
+  }
+  return 2
+}
+
+// Without a query this is pure MRU. With one, match quality leads and MRU only
+// breaks ties, so typing always beats recency — the same invariant the app list
+// keeps between fuzzy score and frecency.
+function rankWindowRows(rows, query) {
+  var list = []
+  for (var i = 0; i < (rows || []).length; i++) {
+    if (matchesWindowQuery(rows[i], query)) list.push({ row: rows[i], order: i })
+  }
+  var text = String(query || "").trim()
+  list.sort(function(a, b) {
+    if (text) {
+      var ta = windowMatchTier(a.row, text)
+      var tb = windowMatchTier(b.row, text)
+      if (ta !== tb) return ta - tb
+    }
+    var ra = Number(a.row.rank)
+    var rb = Number(b.row.rank)
+    if (ra !== rb) return ra - rb
+    return a.order - b.order
+  })
+  var out = []
+  for (var k = 0; k < list.length; k++) out.push(list[k].row)
+  return out
+}
+
+// `searchFocused` matters for the same reason it does in catalogHint: a plain
+// `m` in the search field types a letter, so it becomes Ctrl+M there.
+// Deliberately does not name the workspace: the badge sits immediately to the
+// right of this text and already says it.
+function windowHint(row, searchFocused) {
+  if (!row) return ""
+  return "↵ focus · " + (searchFocused ? "^m" : "m") + " move"
+}
+
+function searchPlaceholder(view) {
+  if (view === "store") return "search apps and packages..."
+  if (view === "windows") return "search windows..."
+  return "search apps..."
+}
+
+// -------------------------------------------------------------- move window
+//
+// Dispatch strings are built here rather than inline in the QML because
+// `Hyprland.dispatch` is fire-and-forget: a syntactically valid but wrong
+// dispatcher silently does nothing and never throws, so a unit test on the
+// string is the only automated coverage this integration can have.
+// Both forms are lifted verbatim from Omarchy's own bindings
+// (/usr/share/omarchy/default/hypr/bindings/tiling.lua:22-28).
+
+function isMoveTarget(target) {
+  return /^([1-9]|special:[a-z0-9_-]+)$/.test(String(target || ""))
+}
+
+function scratchpadTarget() {
+  return SPECIAL_PREFIX + SCRATCHPAD_NAME
+}
+
+// Moves the *focused* window. Whether the lua form accepts a `window =`
+// selector is unverified, so callers focus the window first and move it second.
+function moveWindowDispatch(target, follow, lua) {
+  var value = String(target || "")
+  if (!isMoveTarget(value)) return ""
+  if (lua) {
+    return follow
+      ? 'hl.dsp.window.move({ workspace = "' + value + '" })'
+      : 'hl.dsp.window.move({ workspace = "' + value + '", follow = false })'
+  }
+  return (follow ? "movetoworkspace " : "movetoworkspacesilent ") + value
+}
+
+function isSpecialName(name) {
+  return /^[a-z0-9_-]+$/.test(String(name || ""))
+}
+
+function toggleSpecialDispatch(name, lua) {
+  var value = String(name || "")
+  if (!isSpecialName(value)) return ""
+  return lua
+    ? 'hl.dsp.workspace.toggle_special("' + value + '")'
+    : "togglespecialworkspace " + value
+}
+
+function movePrompt(row, workspaceNames) {
+  var what = row && row.appName ? row.appName : "this window"
+  return "move " + what + " → 1-9 · 0 scratchpad · esc cancel"
+}
+
+// -------------------------------------------------------------- scratchpad
+//
+// Derived from toplevels rather than Hyprland.workspaces: `hyprctl clients`
+// always names a window's workspace, whereas the Quickshell workspace model
+// carrying special workspaces is not something this plugin should depend on.
+function specialWorkspaceRows(toplevels, desktopEntries, userNames, name) {
+  var target = SPECIAL_PREFIX + String(name || SCRATCHPAD_NAME)
+  var rows = windowRows(toplevels, desktopEntries, userNames, null, null)
+  var apps = []
+  var addresses = []
+  for (var i = 0; i < rows.length; i++) {
+    if (rows[i].workspaceRawName !== target) continue
+    apps.push(rows[i].appName)
+    addresses.push(rows[i].address)
+  }
+  return {
+    name: String(name || SCRATCHPAD_NAME),
+    count: apps.length,
+    apps: apps,
+    addresses: addresses,
+    summary: apps.join(", ")
+  }
+}
+
+function scratchpadLabel(info) {
+  if (!info || !(info.count > 0)) return "empty"
+  if (info.count === 1) return String(info.apps[0] || "1 window")
+  return String(info.apps[0] || "window") + " +" + (info.count - 1)
 }
 
 var SESSION_ACTIONS = {
@@ -1125,8 +1414,17 @@ function companionInstallCommand(id, facts) {
   return null
 }
 
-function moveCursor(section, workspaceId, pinnedIndex, dx, dy, workspaceCount, pinnedCount) {
+// `hasScratchpad` is optional and last: without it this behaves exactly as it
+// did before the chip existed, which is what keeps the existing callers and
+// their tests honest.
+function moveCursor(section, workspaceId, pinnedIndex, dx, dy, workspaceCount, pinnedCount, hasScratchpad) {
   var columns = 3
+  if (section === "scratchpad") {
+    // Up returns to the bottom-left grid cell; right hops to the pinned list.
+    if (dy < 0) return cursorIndex("workspaces", workspaceId, pinnedIndex, workspaceCount, pinnedCount)
+    if (dx > 0) return cursorIndex("pinned", workspaceId, pinnedIndex, workspaceCount, pinnedCount)
+    return cursorIndex("scratchpad", workspaceId, pinnedIndex, workspaceCount, pinnedCount)
+  }
   if (section === "pinned") {
     if (dx > 0) return cursorIndex("pinned", workspaceId, pinnedIndex, workspaceCount, pinnedCount)
     if (dx < 0) return cursorIndex("workspaces", workspaceCount, pinnedIndex, workspaceCount, pinnedCount)
@@ -1144,7 +1442,11 @@ function moveCursor(section, workspaceId, pinnedIndex, dx, dy, workspaceCount, p
   if (col >= columns) return cursorIndex("pinned", workspaceId, Math.min(row, Math.max(0, pinnedCount - 1)), workspaceCount, pinnedCount)
   if (col < 0) col = 0
   if (row < 0) row = 0
-  if (row >= rows) row = rows - 1
+  // Down off the bottom row lands on the scratchpad chip when there is one.
+  if (row >= rows) {
+    if (hasScratchpad) return cursorIndex("scratchpad", workspaceId, pinnedIndex, workspaceCount, pinnedCount)
+    row = rows - 1
+  }
 
   var next = row * columns + col + 1
   if (next > workspaceCount) next = workspaceCount

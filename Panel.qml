@@ -105,10 +105,45 @@ Panel {
       rows = Model.rankAppRows(rows, root.appUsage, root.nowSeconds(), root.searchQuery)
     return Model.catalogRecords(rows, root.appNames, setting("pinnedApps", null), root.appAliases, index)
   }
+  readonly property var workspaceNames: setting("workspaceNames", "")
+  readonly property bool moveFollowsWindow: setting("moveFollowsWindow", false) === true
+  readonly property bool scratchpadEnabled: setting("showScratchpad", true) === true
+
+  property int windowCursor: 0
+  // Frozen when the windows view opens: refreshToplevels() is async, so a live
+  // binding on focusHistoryID would reshuffle the list under the cursor a beat
+  // after you got there.
+  property var windowRanks: ({})
+  // "" = not armed. Otherwise the address to move, or "focused".
+  property string movePending: ""
+
+  readonly property var windowList: {
+    var _ = Hyprland.toplevels.values
+    var __ = Hyprland.activeToplevel
+    // Same off-screen gate as the app catalog: no point re-walking every
+    // window because focus changed while the list is not visible.
+    if (!root.opened || !root.browsingWindows) return []
+    return Model.rankWindowRows(
+      Model.windowRows(Hyprland.toplevels, DesktopEntries, root.appNames, root.workspaceNames, root.windowRanks),
+      root.searchQuery)
+  }
+  readonly property var windowCurrentRow: root.windowList[root.windowCursor] || null
+
+  readonly property var scratchpadInfo: {
+    var _ = Hyprland.toplevels.values
+    var __ = Hyprland.activeToplevel
+    if (!root.opened || !root.scratchpadEnabled) return { name: "scratchpad", count: 0, apps: [], addresses: [], summary: "" }
+    return Model.specialWorkspaceRows(Hyprland.toplevels, DesktopEntries, root.appNames, "scratchpad")
+  }
+  readonly property bool scratchpadVisible: root.scratchpadEnabled && !root.overlayView
+
   readonly property bool browsingApps: root.view === "apps"
   readonly property bool browsingStore: root.view === "store"
-  // Both overlay views hide the workspace grid and the workspace-only footer.
-  readonly property bool overlayView: root.browsingApps || root.browsingStore
+  readonly property bool browsingWindows: root.view === "windows"
+  // Every full-width view hides the workspace grid and the workspace-only
+  // footer. Defined as the complement of the grid rather than a union of named
+  // views, so a fifth view does not have to remember to add itself here.
+  readonly property bool overlayView: root.view !== "workspaces"
   readonly property bool confirmingSession: root.sessionConfirm !== ""
   readonly property bool confirmingStore: root.storeConfirmRow !== null
   readonly property bool confirmingCompanion: root.companionConfirm !== ""
@@ -181,6 +216,8 @@ Panel {
     root.view = "workspaces"
     root.searchQuery = ""
     root.appCursor = 0
+    root.windowCursor = 0
+    root.movePending = ""
     root.storeCursor = 0
     root.storePackages = []
     root.sessionConfirm = ""
@@ -268,7 +305,8 @@ Panel {
     var _ = Hyprland.workspaces.values
     var __ = Hyprland.activeToplevel
     var ___ = Hyprland.focusedWorkspace
-    return Model.workspacePresentation(lookupWorkspace(id), DesktopEntries, root.appNames)
+    return Model.workspacePresentation(lookupWorkspace(id), DesktopEntries, root.appNames,
+                                       Model.workspaceName(root.workspaceNames, id))
   }
 
   function workspaceIsOccupied(id) {
@@ -305,6 +343,33 @@ Panel {
     if (root.bar)
       root.bar.run("hyprctl dispatch " + Util.shellQuote("hl.dsp.focus({ workspace = \"" + n + "\" })"))
     return true
+  }
+
+  // `Hyprland.dispatch` is fire-and-forget over a socket: a dispatcher that is
+  // syntactically fine but semantically wrong does nothing and never throws.
+  // So the syntax is chosen from `usingLua` rather than guessed at with a
+  // try/catch ladder — the catch here is only for the method being absent.
+  function dispatchRaw(request) {
+    if (!request) return
+    try {
+      Hyprland.dispatch(request)
+    } catch (e) {
+      if (root.bar) root.bar.run("hyprctl dispatch " + Util.shellQuote(request))
+    }
+  }
+
+  // `!== false` rather than `=== true`: the two syntaxes are mutually
+  // exclusive — a lua-configured Hyprland rejects `movetoworkspacesilent 4`
+  // outright — and dispatch cannot report that failure back. So an absent
+  // `usingLua` has to fall to lua, which is what Omarchy ships.
+  readonly property bool hyprlandUsesLua: Hyprland.usingLua !== false
+
+  function dispatchMoveWindow(target, follow) {
+    dispatchRaw(Model.moveWindowDispatch(target, follow, root.hyprlandUsesLua))
+  }
+
+  function dispatchToggleScratchpad() {
+    dispatchRaw(Model.toggleSpecialDispatch("scratchpad", root.hyprlandUsesLua))
   }
 
   function focusWindowAddress(address) {
@@ -393,6 +458,9 @@ Panel {
 
   // The row under the cursor, whichever list is showing.
   function currentApp() {
+    // The windows view has no app cursor, and falling through to the pinned
+    // one would spawn a copy of whatever is selected behind the overlay.
+    if (root.browsingWindows) return null
     if (root.browsingApps) {
       var entry = root.catalog[root.appCursor]
       return entry ? { id: entry.id, name: entry.name } : null
@@ -528,6 +596,14 @@ Panel {
       root.launchCatalogApp(root.appCursor)
       return
     }
+    if (root.browsingWindows) {
+      root.activateWindowRow()
+      return
+    }
+    if (root.focusSection === "scratchpad") {
+      root.toggleScratchpad()
+      return
+    }
     if (root.focusSection === "pinned") {
       if (root.focusPinnedIndex >= 0 && root.focusPinnedIndex < root.pinned.length)
         root.launchPinned(root.pinned[root.focusPinnedIndex])
@@ -550,6 +626,10 @@ Panel {
       root.appCursor = Model.moveAppCursor(root.appCursor, dy !== 0 ? dy : dx, root.catalog.length)
       return
     }
+    if (root.browsingWindows) {
+      root.windowCursor = Model.moveAppCursor(root.windowCursor, dy !== 0 ? dy : dx, root.windowList.length)
+      return
+    }
     root.cursorActive = true
     var next = Model.moveCursor(
       root.focusSection,
@@ -558,7 +638,8 @@ Panel {
       dx,
       dy,
       root.workspaceCount,
-      root.pinned.length
+      root.pinned.length,
+      root.scratchpadVisible
     )
     root.focusSection = next.section
     root.focusWorkspaceId = next.workspaceId
@@ -566,7 +647,18 @@ Panel {
   }
 
   function handleDigit(text) {
-    if (root.overlayView || root.confirmingAny) return
+    if (root.confirmingAny) return
+    // While move-mode is armed the digits mean "put it there", in every view —
+    // so this has to come before the overlay guard, or they are dead keys in
+    // the windows list. `0` is only reachable here, which is what makes it
+    // free to mean the scratchpad.
+    if (root.movePending !== "") {
+      if (text === "0") { root.moveWindowTo(Model.scratchpadTarget()); return }
+      var target = parseInt(text, 10)
+      if (target >= 1 && target <= root.workspaceCount) root.moveWindowTo(String(target))
+      return
+    }
+    if (root.overlayView) return
     var n = parseInt(text, 10)
     if (!(n >= 1 && n <= root.workspaceCount)) return
     root.cursorActive = true
@@ -577,6 +669,71 @@ Panel {
 
   function enterApps(focusSearch) {
     root.enterView("apps", focusSearch)
+  }
+
+  function enterWindows(focusSearch) {
+    Hyprland.refreshToplevels()
+    root.windowRanks = Model.windowMruRanks(Hyprland.toplevels)
+    root.windowCursor = 0
+    root.enterView("windows", focusSearch)
+  }
+
+  function activateWindowRow() {
+    var row = root.windowCurrentRow
+    if (!row) return
+    if (row.special) {
+      // A stashed window is only reachable once its special workspace is out.
+      root.dispatchToggleScratchpad()
+    } else if (row.workspaceId > 0) {
+      root.dispatchWorkspace(row.workspaceId)
+    }
+    root.focusWindowAddress(row.address)
+    root.close()
+  }
+
+  // Arming, rather than a modified key: PanelKeyCatcher hands panels
+  // `event.text`, so Shift+1 arrives as `!` (or whatever the layout puts
+  // there) and never as a digit. See CLAUDE.md.
+  function armMove(address) {
+    if (root.confirmingAny) return
+    root.movePending = String(address || "") || "focused"
+    keyCatcher.forceActiveFocus()
+  }
+
+  function moveTargetRow() {
+    if (root.movePending === "" || root.movePending === "focused") return null
+    for (var i = 0; i < root.windowList.length; i++) {
+      if (root.windowList[i].address === root.movePending) return root.windowList[i]
+    }
+    return null
+  }
+
+  function moveWindowTo(target) {
+    var address = root.movePending === "focused" ? "" : root.movePending
+    root.movePending = ""
+    if (!Model.isMoveTarget(target)) return
+    // Focus first, then move: the lua dispatcher moves the *focused* window,
+    // and whether it accepts a `window =` selector is unverified.
+    if (address) root.focusWindowAddress(address)
+    root.dispatchMoveWindow(target, root.moveFollowsWindow)
+    if (root.moveFollowsWindow && target.indexOf("special:") !== 0)
+      root.dispatchWorkspace(parseInt(target, 10))
+    root.close()
+  }
+
+  function requestMove() {
+    if (root.browsingWindows) {
+      var row = root.windowCurrentRow
+      if (row) root.armMove(row.address)
+      return
+    }
+    if (root.overlayView) return
+    root.armMove("focused")
+  }
+
+  function toggleScratchpad() {
+    root.dispatchToggleScratchpad()
+    root.close()
   }
 
   function enterStore(focusSearch) {
@@ -591,7 +748,9 @@ Panel {
     root.companionConfirm = ""
     root.storeConfirmRow = null
     root.view = name
+    root.movePending = ""
     if (root.appCursor >= root.catalog.length) root.appCursor = 0
+    if (root.windowCursor >= root.windowList.length) root.windowCursor = 0
     root.storeCursor = Store.storeClampCursor(root.storeRows, root.storeCursor)
     if (!focusSearch) {
       root.swallowSearchChar = false
@@ -609,6 +768,8 @@ Panel {
     root.view = "workspaces"
     root.searchQuery = ""
     root.appCursor = 0
+    root.windowCursor = 0
+    root.movePending = ""
     root.storeCursor = 0
     root.storePackages = []
     root.sessionConfirm = ""
@@ -620,6 +781,10 @@ Panel {
 
   function handleEscape() {
     if (root.sessionDialogKey(Qt.Key_Escape)) return
+    if (root.movePending !== "") {
+      root.movePending = ""
+      return
+    }
     if (root.overlayView) {
       root.leaveOverlay()
       return
@@ -995,16 +1160,35 @@ Panel {
       onTextKey: function(t) {
         if (root.confirmingAny) return
         var key = String(t || "").toLowerCase()
+        // Armed move-mode owns the keyboard: digits land the window, anything
+        // else backs out rather than doing two things at once.
+        if (root.movePending !== "") {
+          if (t >= "0" && t <= "9") { root.handleDigit(t); return }
+          root.movePending = ""
+          return
+        }
         if (key === "q" || key === "/") {
-          if (root.browsingStore) root.enterView("store", true)
-          else root.enterApps(true)
+          // Search within whichever full-width view is already open.
+          root.enterView(root.overlayView ? root.view : "apps", true)
           return
         }
         if (key === "a") {
           root.enterApps(false)
           return
         }
-        if (key === "s" && !root.browsingApps) {
+        if (key === "w") {
+          root.enterWindows(false)
+          return
+        }
+        if (key === "m") {
+          root.requestMove()
+          return
+        }
+        if (key === "0" && !root.overlayView && root.scratchpadEnabled) {
+          root.toggleScratchpad()
+          return
+        }
+        if (key === "s" && !root.browsingApps && !root.browsingWindows) {
           root.enterStore(false)
           return
         }
@@ -1016,7 +1200,9 @@ Panel {
           root.checkPluginUpdates()
           return
         }
-        if (key === "n" && !root.browsingStore) {
+        // Not in the windows view: a window gives a class, not a desktop id,
+        // so there is nothing safe to spawn a second copy of.
+        if (key === "n" && !root.browsingStore && !root.browsingWindows) {
           root.launchNewInstance(root.currentApp())
           return
         }
@@ -1085,6 +1271,9 @@ Panel {
                   readonly property string label: (info && info.name) ? String(info.name) : "empty"
                   readonly property string subtitle: (info && info.subtitle) ? String(info.subtitle) : ""
                   readonly property bool hasSubtitle: subtitle.length > 0
+                  // Only on an occupied cell: an empty one already reads as
+                  // its name, so repeating it would just say it twice.
+                  readonly property string wsName: (info && info.workspaceName && info.occupied) ? String(info.workspaceName) : ""
                   readonly property int cellWidth: Math.max(
                     Style.space(110),
                     Math.floor((workspaceGrid.width - workspaceGrid.columnSpacing * (root.workspaceColumns - 1)) / root.workspaceColumns)
@@ -1133,15 +1322,31 @@ Panel {
                       width: parent.width - root.badgeSize - parent.spacing
                       spacing: Style.space(1)
 
-                      Text {
+                      Row {
                         width: parent.width
-                        text: workspaceRow.label
-                        color: workspaceRow.occupied || workspaceRow.focused
-                          ? root.contentForeground
-                          : root.dimForeground
-                        font.family: root.contentFontFamily
-                        font.pixelSize: Style.font.subtitle
-                        elide: Text.ElideRight
+                        spacing: Style.space(6)
+
+                        Text {
+                          id: workspaceLabelText
+                          width: Math.min(implicitWidth, parent.width - (wsNameText.visible ? wsNameText.implicitWidth + parent.spacing : 0))
+                          text: workspaceRow.label
+                          color: workspaceRow.occupied || workspaceRow.focused
+                            ? root.contentForeground
+                            : root.dimForeground
+                          font.family: root.contentFontFamily
+                          font.pixelSize: Style.font.subtitle
+                          elide: Text.ElideRight
+                        }
+
+                        Text {
+                          id: wsNameText
+                          visible: workspaceRow.wsName !== ""
+                          text: workspaceRow.wsName
+                          color: root.dimForeground
+                          font.family: root.contentFontFamily
+                          font.pixelSize: Style.font.caption
+                          anchors.verticalCenter: parent.verticalCenter
+                        }
                       }
 
                       Text {
@@ -1166,8 +1371,100 @@ Panel {
                       root.focusSection = "workspaces"
                       root.focusWorkspaceId = workspaceRow.workspaceId
                     }
-                    onClicked: root.activateWorkspace(workspaceRow.workspaceId)
+                    onClicked: function(mouse) {
+                      // Shift+click sends the focused window here instead of
+                      // going there — the grid's one direct manipulation.
+                      if (mouse.modifiers & Qt.ShiftModifier) {
+                        root.armMove("focused")
+                        root.moveWindowTo(String(workspaceRow.workspaceId))
+                        return
+                      }
+                      root.activateWorkspace(workspaceRow.workspaceId)
+                    }
                   }
+                }
+              }
+            }
+
+            // Hyprland's special workspace is otherwise invisible: SUPER+S
+            // toggles something you cannot see or count.
+            Item {
+              id: scratchpadChip
+              visible: root.scratchpadVisible
+              width: parent.width
+              height: Style.space(30)
+
+              readonly property bool selected: root.cursorActive && root.focusSection === "scratchpad"
+              readonly property bool filled: root.scratchpadInfo.count > 0
+
+              Rectangle {
+                anchors.fill: parent
+                radius: Style.cornerRadius
+                color: scratchpadChip.selected || scratchpadMouse.containsMouse
+                  ? Style.hoverFillFor(root.contentForeground, Color.accent)
+                  : "transparent"
+              }
+
+              Row {
+                anchors.verticalCenter: parent.verticalCenter
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.leftMargin: Style.space(4)
+                anchors.rightMargin: Style.space(4)
+                spacing: Style.space(8)
+
+                Rectangle {
+                  width: root.badgeSize
+                  height: root.badgeSize
+                  radius: Math.max(2, Style.space(3))
+                  anchors.verticalCenter: parent.verticalCenter
+                  color: scratchpadChip.filled
+                    ? root.contentForeground
+                    : Qt.rgba(root.contentForeground.r, root.contentForeground.g, root.contentForeground.b, 0.55)
+
+                  Text {
+                    anchors.centerIn: parent
+                    text: "0"
+                    color: root.badgeForeground
+                    font.family: root.contentFontFamily
+                    font.pixelSize: Style.font.bodySmall
+                    font.bold: true
+                  }
+                }
+
+                Text {
+                  text: "scratchpad"
+                  color: scratchpadChip.filled ? root.contentForeground : root.dimForeground
+                  font.family: root.contentFontFamily
+                  font.pixelSize: Style.font.body
+                  anchors.verticalCenter: parent.verticalCenter
+                }
+
+                Text {
+                  text: Model.scratchpadLabel(root.scratchpadInfo)
+                  color: root.dimForeground
+                  font.family: root.contentFontFamily
+                  font.pixelSize: Style.font.bodySmall
+                  anchors.verticalCenter: parent.verticalCenter
+                }
+              }
+
+              MouseArea {
+                id: scratchpadMouse
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onEntered: {
+                  root.cursorActive = true
+                  root.focusSection = "scratchpad"
+                }
+                onClicked: function(mouse) {
+                  if (mouse.modifiers & Qt.ShiftModifier) {
+                    root.armMove("focused")
+                    root.moveWindowTo(Model.scratchpadTarget())
+                    return
+                  }
+                  root.toggleScratchpad()
                 }
               }
             }
@@ -1509,6 +1806,184 @@ Panel {
             }
 
             Column {
+              id: windowsBody
+              visible: root.browsingWindows
+              width: parent.width
+              height: parent.height
+              spacing: Style.space(10)
+
+              Row {
+                width: parent.width
+                Text {
+                  width: parent.width - windowsEscHint.implicitWidth
+                  text: "All windows"
+                  color: root.contentForeground
+                  font.family: root.contentFontFamily
+                  font.pixelSize: Style.font.title
+                }
+                Text {
+                  id: windowsEscHint
+                  text: "esc → workspaces"
+                  color: root.dimForeground
+                  font.family: root.contentFontFamily
+                  font.pixelSize: Style.font.bodySmall
+                  anchors.verticalCenter: parent.verticalCenter
+                }
+              }
+
+              ListView {
+                id: windowsList
+                width: parent.width
+                height: parent.height - y
+                clip: true
+                boundsBehavior: Flickable.StopAtBounds
+                spacing: Style.space(2)
+                model: root.windowList
+                currentIndex: root.windowCursor
+                highlightFollowsCurrentItem: false
+                onCurrentIndexChanged: {
+                  if (currentIndex >= 0)
+                    positionViewAtIndex(currentIndex, ListView.Contain)
+                }
+
+                delegate: Item {
+                  id: windowRow
+                  required property var modelData
+                  required property int index
+                  readonly property bool selected: root.windowCursor === index
+
+                  width: windowsList.width
+                  height: Style.space(32)
+
+                  Rectangle {
+                    anchors.fill: parent
+                    radius: Style.cornerRadius
+                    color: windowRow.selected || windowMouse.containsMouse
+                      ? Style.hoverFillFor(root.contentForeground, Color.accent)
+                      : "transparent"
+                  }
+
+                  Image {
+                    id: windowIcon
+                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.left: parent.left
+                    anchors.leftMargin: Style.space(8)
+                    width: Style.font.iconLarge
+                    height: Style.font.iconLarge
+                    fillMode: Image.PreserveAspectFit
+                    sourceSize.width: width * Screen.devicePixelRatio
+                    sourceSize.height: height * Screen.devicePixelRatio
+                    source: root.appLibrary && windowRow.modelData.icon
+                      ? root.appLibrary.iconSource(windowRow.modelData.icon)
+                      : ""
+                    asynchronous: true
+                  }
+
+                  // A window class does not always resolve to a desktop entry
+                  // (Electron and webapp classes especially), so the glyph
+                  // stands in rather than leaving a hole in the row.
+                  Text {
+                    anchors.centerIn: windowIcon
+                    visible: windowIcon.status !== Image.Ready
+                    text: ""
+                    color: root.dimForeground
+                    font.family: Style.bar.iconFont
+                    font.pixelSize: Style.font.icon
+                  }
+
+                  Column {
+                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.left: windowIcon.right
+                    anchors.right: windowTrailing.left
+                    anchors.leftMargin: Style.space(8)
+                    anchors.rightMargin: Style.space(8)
+                    spacing: 0
+
+                    Text {
+                      width: parent.width
+                      text: windowRow.modelData.title || windowRow.modelData.appName
+                      color: root.contentForeground
+                      font.family: root.contentFontFamily
+                      font.pixelSize: Style.font.body
+                      elide: Text.ElideRight
+                    }
+                    Text {
+                      width: parent.width
+                      visible: !!windowRow.modelData.title
+                      text: windowRow.modelData.appName
+                      color: root.dimForeground
+                      font.family: root.contentFontFamily
+                      font.pixelSize: Style.font.caption
+                      elide: Text.ElideRight
+                    }
+                  }
+
+                  Row {
+                    id: windowTrailing
+                    z: 1
+                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.right: parent.right
+                    anchors.rightMargin: Style.space(8)
+                    spacing: Style.space(10)
+
+                    Text {
+                      visible: windowRow.selected
+                      text: Model.windowHint(windowRow.modelData, searchInput.activeFocus)
+                      color: root.dimForeground
+                      font.family: root.contentFontFamily
+                      font.pixelSize: Style.font.bodySmall
+                      anchors.verticalCenter: parent.verticalCenter
+                    }
+
+                    Text {
+                      visible: windowRow.modelData.pinned
+                      text: "󰀃"
+                      color: root.dimForeground
+                      font.family: Style.bar.iconFont
+                      font.pixelSize: Style.font.bodySmall
+                      anchors.verticalCenter: parent.verticalCenter
+                    }
+
+                    Text {
+                      text: windowRow.modelData.workspaceLabel
+                      color: windowRow.modelData.activated ? Color.accent : root.dimForeground
+                      font.family: root.contentFontFamily
+                      font.pixelSize: Style.font.bodySmall
+                      anchors.verticalCenter: parent.verticalCenter
+                    }
+                  }
+
+                  MouseArea {
+                    id: windowMouse
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onEntered: root.windowCursor = windowRow.index
+                    onClicked: function(mouse) {
+                      root.windowCursor = windowRow.index
+                      // Shift+click arms the move instead of jumping to it —
+                      // the mouse can see modifiers even though the key
+                      // catcher cannot.
+                      if (mouse.modifiers & Qt.ShiftModifier) root.armMove(windowRow.modelData.address)
+                      else root.activateWindowRow()
+                    }
+                  }
+                }
+
+                Text {
+                  visible: windowsList.count === 0
+                  anchors.left: parent.left
+                  anchors.top: parent.top
+                  anchors.margins: Style.space(8)
+                  text: root.searchQuery ? "No matching windows" : "No open windows"
+                  color: root.dimForeground
+                  font.family: root.contentFontFamily
+                  font.pixelSize: Style.font.bodySmall
+                }
+              }
+            }
+
+            Column {
               id: storeBody
               visible: root.browsingStore
               width: parent.width
@@ -1670,6 +2145,9 @@ Panel {
                         // Plugins carry their own status text: "update - 2
                         // commits", "up to date", "local checkout", ...
                         if (row.kind === "plugin") return row.detail
+                        // Action rows say what they do; "install" is wrong for
+                        // both halves of the web-app pair.
+                        if (row.actionLabel) return row.actionLabel
                         if (row.state === "installed") return storeRow.selected && Store.storeCanUninstall(row) ? "x uninstall" : "installed"
                         return "install"
                       }
@@ -1724,8 +2202,38 @@ Panel {
             width: parent.width
             height: Style.space(30)
 
+            // Armed move-mode takes over the footer, because it also takes
+            // over the keyboard — the digits no longer switch workspaces.
+            Row {
+              id: moveBanner
+              visible: root.movePending !== ""
+              z: 5
+              anchors.left: parent.left
+              anchors.right: parent.right
+              anchors.verticalCenter: parent.verticalCenter
+              spacing: Style.space(8)
+
+              Rectangle {
+                width: parent.width
+                height: Style.space(24)
+                radius: Style.cornerRadius
+                color: Style.hoverFillFor(root.contentForeground, Color.accent)
+
+                Text {
+                  anchors.verticalCenter: parent.verticalCenter
+                  anchors.left: parent.left
+                  anchors.leftMargin: Style.space(8)
+                  text: Model.movePrompt(root.moveTargetRow(), root.workspaceNames)
+                  color: root.contentForeground
+                  font.family: root.contentFontFamily
+                  font.pixelSize: Style.font.bodySmall
+                }
+              }
+            }
+
             Row {
               id: leftFooter
+              visible: root.movePending === ""
               anchors.left: parent.left
               anchors.verticalCenter: parent.verticalCenter
               spacing: Style.space(10)
@@ -1804,8 +2312,14 @@ Panel {
                         event.accepted = true
                       } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
                         if (root.browsingStore) root.activateStoreRow()
+                        else if (root.browsingWindows) root.activateWindowRow()
                         else if (event.modifiers & Qt.ShiftModifier) root.launchNewInstance(root.currentApp())
                         else root.launchCatalogApp(root.appCursor)
+                        event.accepted = true
+                      } else if (event.key === Qt.Key_M && (event.modifiers & Qt.ControlModifier)) {
+                        // A plain `m` types a letter here, the same reason
+                        // pinning is Ctrl+P and a new instance is Ctrl+N.
+                        root.requestMove()
                         event.accepted = true
                       } else if (event.key === Qt.Key_N && (event.modifiers & Qt.ControlModifier)) {
                         root.launchNewInstance(root.currentApp())
@@ -1838,7 +2352,7 @@ Panel {
                   }
 
                   Text {
-                    text: root.browsingStore ? "search apps and packages..." : "search apps..."
+                    text: Model.searchPlaceholder(root.view)
                     color: root.dimForeground
                     font.family: root.contentFontFamily
                     font.pixelSize: Style.font.subtitle
@@ -1858,6 +2372,7 @@ Panel {
 
             Row {
               id: rightFooter
+              visible: root.movePending === ""
               anchors.right: parent.right
               anchors.verticalCenter: parent.verticalCenter
               spacing: Style.space(10)
@@ -1903,6 +2418,40 @@ Panel {
                   hoverEnabled: true
                   cursorShape: Qt.PointingHandCursor
                   onClicked: root.enterApps(false)
+                }
+              }
+
+              Item {
+                visible: !root.overlayView
+                width: visible ? windowsFooterRow.implicitWidth : 0
+                height: parent.height
+
+                Row {
+                  id: windowsFooterRow
+                  spacing: Style.space(6)
+                  anchors.verticalCenter: parent.verticalCenter
+
+                  Text {
+                    text: "w"
+                    color: root.keyHintForeground
+                    font.family: root.contentFontFamily
+                    font.pixelSize: Style.font.subtitle
+                  }
+
+                  Text {
+                    text: "windows"
+                    color: windowsFooterMouse.containsMouse ? root.contentForeground : root.dimForeground
+                    font.family: root.contentFontFamily
+                    font.pixelSize: Style.font.bodySmall
+                  }
+                }
+
+                MouseArea {
+                  id: windowsFooterMouse
+                  anchors.fill: parent
+                  hoverEnabled: true
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: root.enterWindows(false)
                 }
               }
 

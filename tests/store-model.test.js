@@ -38,7 +38,8 @@ const MENU = `{
 
   // Meta installers - not apps
   "install.package": {"icon":"","label":"Package","action":"xdg-terminal-exec omarchy-pkg-install"},
-  "install.webapp": {"icon":"","label":"Web App","action":"omarchy-webapp-install"},
+  "install.webapp": {"icon":"","label":"Web App","action":"omarchy-launch-floating-terminal-with-presentation omarchy-webapp-install"},
+  "remove.webapp": {"icon":"","label":"Web App","when":"grep -qE '^Exec=.*omarchy-launch-webapp' $HOME/.local/share/applications/*.desktop","action":"omarchy-webapp-remove"},
 
   // Categories
   "install.browser": {"icon":"","label":"Browser"},
@@ -85,10 +86,10 @@ test("storeCatalog drops meta-installers, submenus and style rows", () => {
   const keys = records.map((r) => r.key)
 
   assert.ok(!keys.includes("package"), "the fzf package picker is not an app")
-  assert.ok(!keys.includes("webapp"))
   assert.ok(!keys.includes("browser"), "a category submenu is not an app")
   assert.ok(!keys.includes("style.font"), "fonts are not apps")
-  assert.equal(records.length, 4)
+  // webapp is the one meta row that IS admitted -- see the allowlist test.
+  assert.equal(records.length, 5)
 })
 
 test("storeCatalog carries category labels and orders by declaration", () => {
@@ -445,4 +446,92 @@ test("storeRows puts plugins in their own section and filters them by query", ()
 
   // With no plugins the store list is exactly what it was before.
   assert.equal(Store.storeRows(records, {}, [], {}).pluginCount, 0)
+})
+
+// -------------------------------------------------------------- web apps
+
+test("the meta allowlist admits webapp and still rejects every picker", () => {
+  const records = Store.storeCatalog(Store.parseMenuJsonc(MENU), [])
+  const keys = records.map((r) => r.key)
+
+  assert.ok(keys.includes("webapp"), "webapp is a real action, not a picker")
+  // The regression that matters: widening the allowlist must not let the fzf
+  // pickers and bulk installers back in.
+  for (const picker of ["package", "aur", "tui", "windows", "preinstalls"]) {
+    assert.ok(!keys.includes(picker), picker + " must stay out of the store")
+  }
+
+  const webapp = records.find((r) => r.key === "webapp")
+  assert.equal(webapp.meta, "webapp")
+  assert.equal(webapp.categoryLabel, "Web apps")
+  assert.equal(webapp.categoryOrder, 998, "sorts after every real category")
+  deepEq(webapp.packages, [], "must not suppress a raw package named webapp")
+  assert.equal(webapp.removeAction, "omarchy-webapp-remove")
+})
+
+test("only the remove guard is batched for webapp, since it has no install when", () => {
+  const records = Store.storeCatalog(Store.parseMenuJsonc(MENU), [])
+  const script = Store.storeGuardScript(records)
+  assert.ok(script.includes("webapp:r"), "the remove guard decides if the row shows")
+  assert.ok(!script.includes("webapp:i"), "there is no install guard to run")
+})
+
+test("the store offers add always, and remove only once a web app exists", () => {
+  const records = Store.storeCatalog(Store.parseMenuJsonc(MENU), [])
+
+  const none = Store.storeRows(records, {}, [], {})
+  const noneKinds = none.rows.filter((r) => String(r.kind).indexOf("webapp") === 0).map((r) => r.kind)
+  deepEq(noneKinds, ["webapp-add"], "nothing to remove when none are installed")
+
+  const some = Store.storeRows(records, { webapp: { removable: true } }, [], {})
+  const someRows = some.rows.filter((r) => String(r.kind).indexOf("webapp") === 0)
+  deepEq(someRows.map((r) => r.kind), ["webapp-add", "webapp-remove"])
+  assert.equal(someRows[0].label, "New web app…")
+  assert.equal(someRows[1].label, "Remove web app…")
+  // Both act on Enter, so neither may be stuck behind the "installed" guard
+  // that activateStoreRow uses to ignore a row.
+  assert.equal(someRows[0].state, "available")
+  assert.equal(someRows[1].state, "available")
+  // ...but "install" is the wrong word for either of them, so the cell reads
+  // actionLabel instead.
+  assert.equal(someRows[0].actionLabel, "create")
+  assert.equal(someRows[1].actionLabel, "remove")
+
+  const header = some.rows.find((r) => r.kind === "header" && r.label === "Web apps")
+  assert.ok(header, "the section gets its own header")
+})
+
+test("both web-app commands reach a terminal, and neither is uninstallable by x", () => {
+  const records = Store.storeCatalog(Store.parseMenuJsonc(MENU), [])
+  const rows = Store.storeRows(records, { webapp: { removable: true } }, [], {}).rows
+  const add = rows.find((r) => r.kind === "webapp-add")
+  const remove = rows.find((r) => r.kind === "webapp-remove")
+
+  // The catalog's install action already carries the wrapper.
+  const addCmd = Store.storeCommand(add)
+  assert.equal(addCmd.mode, "shell")
+  assert.ok(addCmd.command.indexOf("omarchy-launch-floating-terminal-with-presentation") === 0)
+
+  // The catalog's remove action does NOT -- it is a bare gum picker, which
+  // does nothing without a TTY, so we wrap it ourselves.
+  const removeCmd = Store.storeCommand(remove)
+  assert.equal(removeCmd.mode, "argv")
+  assert.equal(removeCmd.argv[0], "omarchy-launch-floating-terminal-with-presentation")
+  assert.equal(removeCmd.argv[1], "omarchy-webapp-remove")
+
+  assert.equal(Store.storeCanUninstall(add), false)
+  assert.equal(Store.storeCanUninstall(remove), false)
+})
+
+test("a web-app row is findable by search and steps under the cursor", () => {
+  const records = Store.storeCatalog(Store.parseMenuJsonc(MENU), [])
+  const webapp = records.find((r) => r.key === "webapp")
+  assert.equal(Store.matchesStoreQuery(webapp, "web"), true)
+  assert.equal(Store.matchesStoreQuery(webapp, "webapp"), true)
+  assert.equal(Store.matchesStoreQuery(webapp, "firefox"), false)
+
+  const rows = Store.storeRows(records, { webapp: { removable: true } }, [], {}).rows
+  const header = rows.findIndex((r) => r.kind === "header" && r.label === "Web apps")
+  const next = Store.storeMoveCursor(rows, header - 1, 1)
+  assert.equal(rows[next].kind, "webapp-add", "the header is stepped over")
 })

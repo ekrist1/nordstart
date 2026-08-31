@@ -11,8 +11,9 @@ The modal has two halves:
   app is already open. Click a running app to jump to its workspace, or a
   closed one to launch it on the first empty workspace.
 
-Behind those sit two full-width views: the **all-apps** list (`a`) and the
-**app store** (`s`), where you can install, update and uninstall software.
+Behind those sit three full-width views: the **all-apps** list (`a`), the
+**window switcher** (`w`), and the **app store** (`s`), where you can install,
+update and uninstall software.
 
 Click a workspace, press `1`–`9`, or move with the arrow keys / `hjkl` and
 press Enter. Tab and Shift+Tab move to the next or previous bar panel.
@@ -120,6 +121,32 @@ omarchy-shell shell toggle io.github.ekrist1.nordstart
   If either companion is missing, the same button offers to install it
   from git in a floating terminal — Nordstart never clones or enables
   anything itself.
+- Press `w` (or click **windows**) for the window switcher: every open window
+  across every workspace, most recently used first, with its title, its app and
+  the workspace it is on. This is the one thing the workspace grid and the app
+  list cannot do — with two editor windows open, the grid only tells you *that*
+  something is on workspace 1, and the app list only takes you to whichever
+  window it picked first. Type to filter on title, app or class; a text match
+  always wins over recency. Enter focuses that exact window.
+- Press `m` to move a window to another workspace, then a digit for where it
+  goes (`0` for the scratchpad). In the window switcher it moves the selected
+  window; anywhere else it moves the one you are focused on. Shift-click a
+  workspace cell does the same with the mouse. `Esc` cancels.
+
+  It is `m` and then a digit rather than Shift+digit because the host hands
+  panels the *typed character*, so Shift+1 arrives as `!` — or `"`, or
+  something else again, depending on your keyboard layout.
+- The **scratchpad** chip under the grid shows what is in Hyprland's special
+  workspace, which is otherwise invisible: `SUPER+S` toggles a window you
+  cannot see or count. Press `0` or click the chip to toggle it, `m` then `0`
+  to stash the focused window there.
+- Name your workspaces with `workspaceNames` (`1=code,2=web,3=mail`). A named
+  empty workspace reads as its name rather than `empty`, so the grid stays a
+  map of where things belong even when nothing is running yet; a busy one shows
+  the name beside the app.
+- The store's **Web apps** section turns any URL into a launcher via
+  `omarchy-webapp-install`, and removes them again — both in a floating
+  terminal, like every other store action.
 - Escape or a click outside the modal closes it. Tab and Shift+Tab move to
   the next or previous bar panel (clock, weather, and so on), including
   panels in other bar sections.
@@ -135,6 +162,9 @@ Tune the widget from the bar settings panel, or inline in
   "hoverOpen": true,
   "showWorkspacePreview": true,
   "workspaceCount": 9,
+  "workspaceNames": "",
+  "moveFollowsWindow": false,
+  "showScratchpad": true,
   "launchWorkspace": "Current workspace",
   "pinnedApps": "firefox,code,thunderbird,tableplus,onlyoffice-desktopeditors",
   "appNames": "",
@@ -151,6 +181,17 @@ workspace` (the default) leaves you where you are, `First empty workspace`
 jumps to the first unoccupied one. The `n` / Shift-click "another copy" action
 ignores this and always opens on the current workspace, since asking for a
 second window is asking for it beside the first.
+
+`workspaceNames` labels the grid: `1=code,2=web,3=mail`, or an equivalent JSON
+object. Unnamed workspaces are unaffected.
+
+`moveFollowsWindow` decides what happens after `m` sends a window somewhere.
+Off (the default) leaves you where you are, the same way launching an app does
+— moving a window off your workspace is usually tidying, not relocating. On
+takes you with it.
+
+`showScratchpad` hides the scratchpad chip if you do not use Hyprland's special
+workspace.
 
 `appOrder` chooses between `Recent first` (the default) and `Alphabetical` for
 the all-apps list. Usage is recorded in `appUsage` as `id:count:timestamp`

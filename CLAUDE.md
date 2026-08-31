@@ -49,7 +49,10 @@ states in prose:
    small output — the rule asks you to say why, not to stop using it.
 3. **`setting()` keys must exist in `barWidget.defaults` *and* `barWidget.schema`,** with matching
    default values. This is the duplication warned about below, now enforced.
-4. **The running shell must be newer than the installed plugin** — catches testing against a stale
+4. **Every panel key is bound once and is reachable** — the keyspace is flat (no modifiers, see
+   the `Panel.qml` notes below), and a collision fails silently: the first matching branch wins
+   and the second key just does nothing.
+5. **The running shell must be newer than the installed plugin** — catches testing against a stale
    compilation after a `rescanPlugins`. Skips when the plugin isn't installed or no shell is running,
    so a fresh checkout stays green.
 
@@ -96,7 +99,8 @@ and lives outside this repo — treat those as an external API surface, not some
   cursor position, search query, session-confirm state, workspace preview). It imports
   `NordstartModel.js as Model` and calls into it for anything computable outside QML. Handles
   keyboard input (digits, hjkl/arrows, `q`/`/` for search, `a` for all-apps, `s` for the store,
-  `p` for pin/unpin, `n` for a new instance, `x` to uninstall, Tab/Shift+Tab to hop between bar
+  `p` for pin/unpin, `n` for a new instance, `w` for the window switcher, `m` to arm a
+  move-to-workspace, `0` for the scratchpad, `x` to uninstall, Tab/Shift+Tab to hop between bar
   panels, Esc to back out/close), workspace switching via Hyprland IPC, and live workspace preview
   capture.
 
@@ -127,10 +131,38 @@ and lives outside this repo — treat those as an external API surface, not some
   class 100 times. The index is only built while `opened && browsingApps`, so window focus changes
   do not re-walk the catalog when it is off screen.
 
-  `view` is three-valued (`workspaces` / `apps` / `store`). `browsingApps` means the apps view
-  specifically; `overlayView` means either full-width view and is what workspace-only UI should
-  branch on. Adding a fourth view means revisiting both. The store's `Process` usage follows two
-  traps documented in the host's `Menu.qml`: a `Process` silently ignores a `command` change while
+  `view` is four-valued (`workspaces` / `apps` / `windows` / `store`). `browsingApps` /
+  `browsingWindows` / `browsingStore` mean that view specifically; `overlayView` is defined as
+  `view !== "workspaces"`, so it covers any full-width view and a fifth one does not have to
+  remember to add itself. Workspace-only UI branches on `overlayView`. `browsingApps` stays
+  apps-specific where it gates the `toplevelIndex` build.
+
+  **The panel has no modified keys.** `PanelKeyCatcher` hands the panel `event.text`, so Shift+1
+  arrives as `!` — or whatever that layout puts on the key — and never as a digit; even a raw
+  handler sees `Qt.Key_Exclam`. It also consumes `h` `j` `k` `l` `x` `X`, Space, Return, Esc and
+  Tab *before* `textKey`, so those can never be action keys. That is why "move a window to
+  workspace N" is armed (`m`, then a digit) rather than bound to Shift+digit, and why `0` — which
+  `handleDigit` never accepted — is free to mean the scratchpad. `tests/source-lint.test.js` rule
+  5 enforces the one-flat-namespace consequence.
+
+  **Window MRU is frozen on view entry.** `focusHistoryID` only moves when `refreshToplevels()`
+  runs, and that is async, so a live-bound sort reshuffles the list under the cursor a beat after
+  you get there. `enterWindows` captures `Model.windowMruRanks` once and passes it in.
+
+  **Dispatch syntax is chosen from `Hyprland.usingLua`, not try/catch.** `Hyprland.dispatch` is
+  fire-and-forget: a dispatcher that is syntactically valid but wrong does nothing and never
+  throws. The two syntaxes are mutually exclusive — a lua-configured Hyprland rejects
+  `movetoworkspacesilent 4` outright — so the test is `usingLua !== false`, defaulting to lua
+  (what Omarchy ships) when the property is missing. The strings themselves are built by
+  `Model.moveWindowDispatch` / `toggleSpecialDispatch`, which is the only automated coverage this
+  integration can have.
+
+  **The scratchpad is derived from `Hyprland.toplevels`, not `Hyprland.workspaces`** — a window's
+  `lastIpcObject.workspace.name` always names `special:scratchpad`, whereas whether the Quickshell
+  workspace model carries special workspaces is not something to depend on. It is
+  `special:scratchpad`, not `special:magic` (`default/hypr/bindings/tiling.lua:27`).
+
+  The store's `Process` usage follows two traps documented in the host's `Menu.qml`: a `Process` silently ignores a `command` change while
   it is running (hence the `guardsPending` / `searchPending` flags), and a killed process still
   reports `exitCode === 0`, so `exitStatus` is what says the run actually finished.
 
@@ -148,7 +180,8 @@ and lives outside this repo — treat those as an external API surface, not some
   contract.
 - **`manifest.json`** — plugin metadata and the settings schema (`hoverOpen`,
   `showWorkspacePreview`, `workspaceCount`, `pinnedApps`, `appNames`, `appAliases`,
-  `appStoreEnabled`, `appStoreSearchAur`, `launchWorkspace`, `pluginUpdateCheck`). Note `barWidget.defaults` and `barWidget.schema[].defaultValue`
+  `appStoreEnabled`, `appStoreSearchAur`, `launchWorkspace`, `pluginUpdateCheck`,
+  `workspaceNames`, `moveFollowsWindow`, `showScratchpad`). Note `barWidget.defaults` and `barWidget.schema[].defaultValue`
   duplicate each other — a new setting has to be added to both. Keep this in
   sync with any new/renamed settings read via `setting(...)` in the QML files, since it's what
   drives the bar's settings panel UI and default values.

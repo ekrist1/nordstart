@@ -244,3 +244,61 @@ test("lint: the running shell is newer than the installed plugin", (t) => {
       `(rescanPlugins is not enough).`
   )
 })
+
+// ---------------------------------------------------------------------------
+// 5. No key is bound twice, and none collides with the host's reserved keys
+//
+// PanelKeyCatcher (/usr/share/omarchy/shell/Ui/PanelKeyCatcher.qml) hands the
+// panel `event.text`, and it consumes h/j/k/l/x/Space/Return/Esc/Tab *before*
+// emitting textKey. So the panel's keyspace is one flat namespace of single
+// letters with no modifiers available: Shift+1 arrives as `!` (or whatever the
+// layout puts there), which is why move-mode is armed with `m` rather than
+// bound to Shift+digit. Nothing at runtime reports a collision — the first
+// matching branch simply wins and the second key silently does nothing.
+
+// Consumed by PanelKeyCatcher before onTextKey ever sees them.
+const RESERVED_KEYS = new Set(["h", "j", "k", "l", "x"])
+
+function extractBoundKeys(source) {
+  const body = source.slice(source.indexOf("onTextKey:"))
+  const out = []
+  const re = /\b(?:key|t)\s*===\s*"([^"]+)"/g
+  let match
+  while ((match = re.exec(body)) !== null) {
+    const key = match[1]
+    // Digit branches are ranges (`t >= "1" && t <= "9"`), handled separately.
+    if (key.length === 1 && /[a-z]/.test(key)) out.push(key)
+  }
+  return out
+}
+
+function keyCollisions(keys) {
+  const seen = new Set()
+  const bad = []
+  for (const key of keys) {
+    if (RESERVED_KEYS.has(key)) bad.push(`${key} is consumed by PanelKeyCatcher and never reaches onTextKey`)
+    else if (seen.has(key)) bad.push(`${key} is bound more than once`)
+    seen.add(key)
+  }
+  return bad
+}
+
+test("lint: every panel key is bound once and is actually reachable", () => {
+  const keys = extractBoundKeys(read("Panel.qml"))
+  // The companion keys live in NordstartModel.js's COMPANIONS table, so they
+  // are invisible to the scan above and have to be folded in by hand.
+  const model = read("NordstartModel.js")
+  const companionKeys = [...model.matchAll(/key:\s*"([a-z])"/g)].map((m) => m[1])
+
+  assert.ok(keys.length > 0, "found no key bindings to check — the scan broke")
+  assert.deepEqual(keyCollisions([...keys, ...companionKeys]), [])
+})
+
+test("lint: the key-collision scan can actually fail", () => {
+  // A lint that cannot fail is worthless (CLAUDE.md).
+  assert.equal(extractBoundKeys('onTextKey: if (key === "w") {} if (key === "m") {}').length, 2)
+  assert.equal(keyCollisions(["w", "m"]).length, 0)
+  assert.equal(keyCollisions(["w", "w"]).length, 1, "a duplicate must be reported")
+  assert.equal(keyCollisions(["j"]).length, 1, "a PanelKeyCatcher-reserved key must be reported")
+  assert.equal(keyCollisions(["a", "s", "a", "l"]).length, 2)
+})
