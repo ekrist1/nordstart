@@ -213,16 +213,7 @@ Panel {
       root.focusWorkspaceId = 1
     root.focusPinnedIndex = 0
     root.cursorActive = true
-    root.view = "workspaces"
-    root.searchQuery = ""
-    root.appCursor = 0
-    root.windowCursor = 0
-    root.movePending = ""
-    root.storeCursor = 0
-    root.storePackages = []
-    root.sessionConfirm = ""
-    root.companionConfirm = ""
-    root.storeConfirmRow = null
+    root.resetToWorkspaces()
     if (root.appLibrary && typeof root.appLibrary.refreshIcons === "function")
       root.appLibrary.refreshIcons()
     if (root.storeEnabled) root.refreshStore()
@@ -764,7 +755,12 @@ Panel {
     })
   }
 
-  function leaveOverlay() {
+  // Shared by open() and leaveOverlay(). These used to be two copies of the
+  // same reset, and they drifted: only leaveOverlay() cleared the text field,
+  // so launching an app from a search (which closes the panel outright, never
+  // going through leaveOverlay) left the typed term on screen at the next
+  // open, with searchQuery already reset to "" behind it.
+  function resetToWorkspaces() {
     root.view = "workspaces"
     root.searchQuery = ""
     root.appCursor = 0
@@ -776,6 +772,10 @@ Panel {
     root.companionConfirm = ""
     root.storeConfirmRow = null
     if (searchInput.text !== "") searchInput.text = ""
+  }
+
+  function leaveOverlay() {
+    root.resetToWorkspaces()
     keyCatcher.forceActiveFocus()
   }
 
