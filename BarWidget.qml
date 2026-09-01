@@ -268,24 +268,40 @@ BarWidget {
         readonly property string appIcon: root.workspaceIcon(workspaceId)
         readonly property bool hovered: pillMouse.containsMouse
         readonly property color ink: root.bar ? root.bar.barForeground : Color.foreground
+        // On a filled tile the label has to invert; an empty workspace fades
+        // instead of relying on a border to say it is empty.
+        readonly property color label: workspacePill.focused
+          ? (root.bar ? root.bar.themeContrastForeground : Color.background)
+          : Qt.rgba(ink.r, ink.g, ink.b, workspacePill.occupied ? 1.0 : 0.45)
 
-        Layout.preferredWidth: root.vertical ? root.barSize : (appIcon ? Style.space(38) : Style.space(24))
-        Layout.preferredHeight: root.vertical ? (appIcon ? Style.space(38) : Style.space(26)) : root.barSize
+        readonly property bool occupied: info.occupied
+        // Uniform tiles: every workspace takes the same slot whether or not it
+        // has an app icon, so the bar keeps its rhythm and never reflows as
+        // windows open and close.
+        Layout.preferredWidth: root.vertical ? root.barSize : Style.space(38)
+        Layout.preferredHeight: root.vertical ? Style.space(38) : root.barSize
 
         Rectangle {
-          anchors.left: parent.left
-          anchors.right: parent.right
-          anchors.leftMargin: Style.space(1)
-          anchors.rightMargin: Style.space(1)
-          anchors.verticalCenter: parent.verticalCenter
-          height: Math.min(parent.height - Style.space(8), Style.space(30))
-          radius: height / 2
+          id: tile
+          anchors.centerIn: parent
+          width: parent.width - Style.space(2)
+          height: root.vertical
+            ? parent.height - Style.space(2)
+            : Math.min(parent.height - Style.space(8), Style.space(30))
+          // A squircle, not a lozenge: Style.cornerRadius tracks Hyprland's
+          // decoration:rounding, so the tiles echo the window corners. Clamped
+          // so a theme with no rounding still reads as a tile, and a very
+          // round one never collapses back into a pill.
+          radius: Math.max(Style.space(5), Math.min(Style.cornerRadius, height / 2 - Style.space(2)))
+
+          // State is carried by fill alone -- no borders. The focused tile
+          // takes the theme accent at full strength (the same colour the bar
+          // uses for its own open-panel mark); the rest are washes of the bar
+          // foreground, so occupied and empty differ only in weight.
           color: workspacePill.focused
-            ? Qt.rgba(workspacePill.ink.r, workspacePill.ink.g, workspacePill.ink.b, 0.20)
-            : "transparent"
-          border.width: workspacePill.focused ? 0 : 1
-          border.color: Qt.rgba(workspacePill.ink.r, workspacePill.ink.g, workspacePill.ink.b,
-                                workspacePill.info.occupied ? 0.75 : 0.28)
+            ? Color.accent
+            : Qt.rgba(workspacePill.ink.r, workspacePill.ink.g, workspacePill.ink.b,
+                      workspacePill.hovered ? 0.20 : (workspacePill.occupied ? 0.11 : 0.05))
 
           Behavior on color {
             ColorAnimation { duration: 120; easing.type: Easing.OutCubic }
@@ -298,10 +314,14 @@ BarWidget {
 
             Text {
               text: String(workspacePill.workspaceId)
-              color: workspacePill.ink
+              color: workspacePill.label
               font.family: Style.font.family
               font.pixelSize: Style.font.body
               horizontalAlignment: Text.AlignHCenter
+
+              Behavior on color {
+                ColorAnimation { duration: 120; easing.type: Easing.OutCubic }
+              }
             }
 
             PillIcon {
@@ -309,7 +329,7 @@ BarWidget {
               Layout.preferredWidth: Style.space(15)
               Layout.preferredHeight: Style.space(15)
               icon: workspacePill.appIcon
-              tint: workspacePill.ink
+              tint: workspacePill.label
             }
           }
 
@@ -321,9 +341,13 @@ BarWidget {
             Text {
               Layout.alignment: Qt.AlignHCenter
               text: String(workspacePill.workspaceId)
-              color: workspacePill.ink
+              color: workspacePill.label
               font.family: Style.font.family
               font.pixelSize: Style.font.caption
+
+              Behavior on color {
+                ColorAnimation { duration: 120; easing.type: Easing.OutCubic }
+              }
             }
 
             PillIcon {
@@ -332,7 +356,7 @@ BarWidget {
               Layout.preferredWidth: Style.space(14)
               Layout.preferredHeight: Style.space(14)
               icon: workspacePill.appIcon
-              tint: workspacePill.ink
+              tint: workspacePill.label
             }
           }
         }
